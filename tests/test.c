@@ -332,7 +332,7 @@ static void test_media_errors(void) {
 }
 int main(void) {
     printf("FAT32 verification (assembly library, synthetic sparse sector backends)\n");
-    test_geometry(); test_buffer(); test_basic(512,1); test_basic(512,128); test_basic(4096,16);
+    test_geometry(); test_buffer(); test_basic(512,1); test_basic(512,64); test_basic(512,128); test_basic(4096,16);
     test_directories(); test_rollback(); test_fragmented(); test_active_fat(); test_no_space(); test_invalid_names();
     test_corruption(); test_win32_io(); test_rename(); test_lfn_damage(); test_mutation_rollback(); test_media_errors();
     printf("PASS: %u suites\n",tests); return 0;

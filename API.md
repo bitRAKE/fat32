@@ -113,9 +113,14 @@ sb_discard(&buffer);                     /* explicitly discard pending sectors *
 win_close(&volume);
 ```
 
-`win_open(...,1)` requires read/write access, locks and dismounts the volume before
-returning, and retains that lock through `win_close`. Reopen and remount when
-changing access mode; do not carry snapshots across it. The adapter uses a
+`win_open(...,1)` requires read/write access and locks the volume before returning.
+It retains that lock through writes and explicit flushes. `win_close` dismounts
+the volume while still locked, then closes the handle and frees its bounce buffer.
+Check its status: failed dismount/handle close returns `F_IO` and records the
+Win32 error, even though cleanup is still attempted. Close never commits pending
+sectors. A failed open also cleans up and returns an error; it does not retry.
+Reopen and remount when changing access mode; do not carry snapshots across it.
+The adapter uses a
 page-aligned bounce buffer for unbuffered I/O, reports short transfers as errors,
 and records the Win32 error in `volume.error`. `win_read`, `win_write`, and
 `win_flush` implement the backend callbacks.

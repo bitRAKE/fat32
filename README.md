@@ -67,11 +67,18 @@ Outputs:
 | `usbcheck.exe` | Compare raw file reads with normal Windows file reads |
 
 `usbcheck X: --write-test` additionally creates an isolated, uniquely named test
-directory through the library, commits it, verifies its file through Windows,
-then removes it through the library. It first requires a clean read comparison
-and a volume named TESTING. Raw write opening must acquire a volume lock and
-dismount it. **This write test was not run on the current USB**, because the
-read-only inspection found existing filesystem damage. See [VALIDATION.md](VALIDATION.md).
+directory through the library. It checks raw creation, repeated flushes, a patch
+across a cluster boundary, zero-filled growth, Unicode rename, packed metadata,
+truncation, and deletion. Windows independently verifies committed file bytes and
+metadata between phases. It first requires a complete read comparison and a
+FAT32 volume named TESTING. Writable opening acquires a volume lock; close
+dismounts after explicit commits, while the lock is still held.
+
+`usbcheck X: --flush-test` checks two explicit flushes on one locked handle without
+staging sector changes. TESTING (X:) was reformatted from 64 KiB to **32 KiB**
+clusters and now passes the complete write test twice, 18 automated suites, and
+read-only CHKDSK. Logs, hashes, and the failure that led to the flush-lifetime fix
+are recorded in [VALIDATION.md](VALIDATION.md).
 
 ## Contracts and scope
 
@@ -93,5 +100,6 @@ short-name decoding is CP437, with a caller-provided OEM table available at moun
 - [Unbuffered file I/O](https://learn.microsoft.com/en-us/windows/win32/fileio/file-buffering)
 - [Volume locking](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_lock_volume)
 
-The 64 KiB cluster case is an intentional compatibility requirement for the
-supplied USB. It exceeds the older specification's conservative 32 KiB guidance.
+The 64 KiB cluster case remains an intentional compatibility requirement from
+the original USB format. It exceeds the older specification's conservative
+32 KiB guidance; the current hardware test uses 32 KiB.

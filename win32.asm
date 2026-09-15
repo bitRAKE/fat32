@@ -82,9 +82,9 @@ body:
 	test eax, eax
 	jz .error
 	mov dword [rbx + WinVolume.locked], 1
-	DeviceIoControl [rbx + WinVolume.handle], 90020h, 0, 0, 0, 0, &returned, 0
-	test eax, eax
-	jz .error
+	; Keep the filesystem locked through commit. FAT32 rejects
+	; FlushFileBuffers after dismount with ERROR_NOT_READY on this host.
+	; Close dismounts while the lock is still held, before releasing it.
 	lea rax, [win_write]
 	mov qword [rbx + WinVolume.ops.write], rax
 .ok:
@@ -102,11 +102,35 @@ body:
 	ret
 endp
 
-proc win_close uses rbx
+proc win_close uses rbx rsi
+	locals
+		returned dd ?
+	endl
+body:
 	mov rbx, rcx
+	xor esi, esi
 	cmp qword [rbx + WinVolume.handle], -1
 	je .memory
+	cmp dword [rbx + WinVolume.locked], 0
+	je .handle
+	; Invalidate the filesystem's cached view before any native access can
+	; resume. This must happen after the explicit commit/flush, not on open.
+	DeviceIoControl [rbx + WinVolume.handle], 90020h, 0, 0, 0, 0, &returned, 0
+	test eax, eax
+	jnz .handle
+	GetLastError
+	mov dword [rbx + WinVolume.error], eax
+	mov esi, F_IO
+.handle:
 	CloseHandle [rbx + WinVolume.handle]
+	test eax, eax
+	jnz .closed
+	test esi, esi
+	jnz .closed
+	GetLastError
+	mov dword [rbx + WinVolume.error], eax
+	mov esi, F_IO
+.closed:
 	mov qword [rbx + WinVolume.handle], -1
 .memory:
 	cmp qword [rbx + WinVolume.bounce], 0
@@ -115,7 +139,7 @@ proc win_close uses rbx
 	mov qword [rbx + WinVolume.bounce], 0
 .done:
 	mov dword [rbx + WinVolume.locked], 0
-	xor eax, eax
+	mov eax, esi
 	ret
 endp
 

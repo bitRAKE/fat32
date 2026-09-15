@@ -89,9 +89,18 @@ reads likewise prioritize validation over streaming performance.
 
 Raw read mode is a live view; it is not an OS snapshot. Other writers can change
 the medium. For a writable session, acquire `win_open(...,1)` **before** mount and
-hold it until after commit/close. Locking flushes host filesystem caches, and
-dismounting prevents a stale Windows cache from being used with raw edits. A lock
-failure is an error; no fallback raw write is attempted. The example is read-only.
+hold it until after commit/close. Locking flushes host filesystem caches. Keep the
+filesystem locked through all writes and `FlushFileBuffers` calls; on this FAT32
+device an early dismount caused even a flush without writes to fail with
+`ERROR_NOT_READY`. Close dismounts while still locked, then releases the handle,
+so subsequent Windows access remounts the edited volume. Dismount and handle-close
+failures propagate. This follows the lock/change/dismount/release sequence in
+[Microsoft's dismount guidance](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_dismount_volume).
+
+A lock failure is an error; no fallback raw write is attempted. The USB harness
+retries denied/sharing/lock-conflict writable acquisition up to 20 times with
+250 ms between attempts, before staging anything. The adapter itself has no retry
+policy. A failed commit is never retried. The example is read-only.
 
 Each backend request transfers exactly one sector through an aligned bounce
 buffer. Device seek, read, write, and flush failures propagate, including short
