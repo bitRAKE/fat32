@@ -1,0 +1,9 @@
+*.asm text eol=crlf
+*.inc text eol=crlf
+*.g text eol=crlf
+*.h text eol=crlf
+*.c text eol=crlf
+*.cmd text eol=crlf
+*.md text eol=lf
+makefile text eol=crlf
+* text=auto

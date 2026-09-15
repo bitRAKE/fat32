@@ -1,0 +1,8 @@
+*.obj
+*.lib
+*.exe
+*.pdb
+*.ilk
+*.response
+*.objdump.txt
+build/
