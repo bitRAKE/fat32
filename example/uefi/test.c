@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
-#include "../../tests/api.h"
+#include "../../fat32.h"
 
 typedef uint64_t (*ReadBlocks)(void *,uint32_t,uint64_t,uint64_t,void *);
 typedef struct GuideEfiRead {
@@ -18,8 +18,8 @@ typedef struct GuideEfiRead {
 _Static_assert(sizeof(GuideEfiRead)==64,"example context");
 _Static_assert(offsetof(GuideEfiRead,online)==56,"example online flag");
 extern int guide_efi_read(GuideEfiRead *,uint64_t,void *);
-extern int guide_mount_readonly(FatIdentity *,GuideEfiRead *,SectorOps *);
-extern int guide_read_root_range(FatIdentity *,const uint16_t *,FatTransfer *);
+extern int guide_mount_readonly(FatIdentity *,GuideEfiRead *,SectorOps *,const FatWorkspace *);
+extern int guide_read_root_range(FatHandle *,const uint16_t *,FatTransfer *);
 
 #define CHECK(c) do { if(!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); exit(1); } } while(0)
 enum { BYTES=512, FAT_SECTORS=512, DATA=32+2*FAT_SECTORS, SECTORS=DATA+65525 };
@@ -44,7 +44,10 @@ static uint64_t mock_read(void *this_pointer,uint32_t media_id,uint64_t lba,uint
 int main(void) {
     static __declspec(align(512)) unsigned char bounce[BYTES];
     static FatIdentity identity;
-    SectorOps ops; FatTransfer transfer; FatEntry entry;
+    static unsigned char workspace_data[3*BYTES];
+    FatWorkspace workspace={workspace_data,sizeof(workspace_data),0};
+    SectorOps ops; FatTransfer transfer; FatVolume volume={0}; FatObject objects[3];
+    FatHandle root_handle={0},file={0};
     Firmware firmware={0x100000005ull,0,37,0,bounce};
     GuideEfiRead context={&firmware,mock_read,firmware.base,SECTORS,bounce,0,37,BYTES,1,0};
     unsigned char output[802]; unsigned i; uint32_t calls;
@@ -58,21 +61,23 @@ int main(void) {
     memcpy(root,"BOOT    BIN",11); root[11]=0x20; wr16(root+26,3); wr32(root+28,777);
     for(i=0;i<sizeof(payload);i++) payload[i]=(unsigned char)(i*13+7);
 
-    CHECK(guide_mount_readonly(&identity,&context,&ops)==F_OK);
+    CHECK(guide_mount_readonly(&identity,&context,&ops,&workspace)==F_OK);
+    CHECK(fat_volume_init(&volume,&identity,objects,3)==F_OK && fat_root(&volume,FH_READ,&root_handle)==F_OK);
     CHECK(ops.context==&context && ops.sectors==SECTORS && ops.sector_bytes==BYTES);
     CHECK(!ops.write && !ops.begin && !ops.end && !ops.flush && !ops.reserved);
     memset(output,0xA5,sizeof(output)); transfer=(FatTransfer){output+1,0,800,99};
-    CHECK(guide_read_root_range(&identity,name,&transfer)==F_OK && transfer.done==777);
+    CHECK(guide_read_root_range(&root_handle,name,&transfer)==F_OK && transfer.done==777);
     CHECK(!memcmp(output+1,payload,777) && output[0]==0xA5 && output[778]==0xA5);
     transfer.offset=500; transfer.length=64;
-    CHECK(guide_read_root_range(&identity,name,&transfer)==F_OK && transfer.done==64);
+    CHECK(guide_read_root_range(&root_handle,name,&transfer)==F_OK && transfer.done==64);
     CHECK(!memcmp(output+1,payload+500,64));
     transfer.offset=777;
-    CHECK(guide_read_root_range(&identity,name,&transfer)==F_OK && transfer.done==0);
+    CHECK(guide_read_root_range(&root_handle,name,&transfer)==F_OK && transfer.done==0);
     transfer.done=99;
-    CHECK(guide_read_root_range(&identity,missing,&transfer)==F_NOTFOUND && transfer.done==0);
-    CHECK(fat_lookup(&identity,2,name,&entry)==F_OK);
-    CHECK(fat_resize(&identity,&entry,1)==F_READONLY);
+    CHECK(guide_read_root_range(&root_handle,missing,&transfer)==F_NOTFOUND && transfer.done==0);
+    CHECK(fat_open(&root_handle,name,3,&file)==F_OK);
+    CHECK(fat_handle_resize(&file,1)==F_READONLY);
+    CHECK(fat_close(&file)==F_OK && fat_close(&root_handle)==F_OK && fat_volume_close(&volume)==F_OK);
 
     calls=firmware.calls;
     CHECK(guide_efi_read(&context,SECTORS,output+1)==F_RANGE && firmware.calls==calls);

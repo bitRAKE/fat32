@@ -45,6 +45,9 @@ end macro
 prologue@proc equ fat32_debug_prologue
 epilogue@proc equ static_rsp_epilogue
 close@proc equ fat32_debug_close
+; Static RSP addressing leaves RBP available as a general nonvolatile register.
+; Prefer pointer/32-bit state there when the full routine encodes smaller.
+; Declare RBP in USES; its save/restore and unwind entry remain mandatory.
 newcoff_debug_procs
 section '.text' code readable executable align 16
 

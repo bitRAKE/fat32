@@ -27,12 +27,14 @@ assert sizeof.GuideEfiRead = 64
 ; Retire the whole mount after F_IO: cached library reads may bypass callbacks.
 
 ; guide_mount_readonly: RCX=zeroed unused FatIdentity*, RDX=validated context*,
-; R8=SectorOps* out. Distinct objects, all live throughout mount. Populates ops,
+; R8=SectorOps* out, R9=const FatWorkspace*. Data holds three sectors and lives
+; through the mount; the descriptor is borrowed for this call. Populates ops,
 ; selects CP437, then returns fat_mount status; failure leaves identity unmounted.
 ; Does not discover/validate/allocate context resources. No write callbacks.
 
-; guide_read_root_range: RCX=mounted identity*, RDX=UTF-16 root component,
+; guide_read_root_range: RCX=live root FatHandle*, RDX=UTF-16 component,
 ; R8=FatTransfer* in-out (data/offset/length initialized). Output done=0 on lookup
-; failure, otherwise read count, including a prefix on read error. No output entry
-; retained. Ordinary file required; no path parsing, image validation, or execute.
+; failure, otherwise read count, including a prefix on read error. Acquires and
+; closes a local file handle. Steady readers retain their own FatHandle and use
+; fat_read_at directly. No path parsing, image validation, or execute.
 end if

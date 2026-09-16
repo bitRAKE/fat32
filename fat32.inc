@@ -1,13 +1,16 @@
 ; FAT32 library ABI. Every public entry uses the Windows x64 calling convention.
-; No ambient register state, allocation, handles, clock, or imports in fat32.obj.
+; No ambient register state, allocation, OS handles, clock, or imports in fat32.obj.
 ; All LBAs are relative to the start of the volume, never the physical disk.
+; New consumers use the shared interface in shared.inc / docs/SHARED.md. The entry
+; snapshot functions documented below are compatibility operations, not the
+; managed handle contract. Do not mix their writers with live shared handles.
 ;
 ; CALL CONTRACT (all fat_* exports; private f_* helpers document exceptions):
 ;   RCX, RDX, R8, R9 carry arguments 1..4; use EDX/R8D for uint32_t values.
 ;   EAX = F_* status. Other volatile registers/flags are unspecified on return.
 ;   Preserve Win64 nonvolatiles; caller provides 32-byte home space, aligned RSP,
-;   and a clear direction flag. Only mount retains the ops/context/OEM lifetime;
-;   other argument pointers are borrowed for the duration of their call.
+;   and a clear direction flag. Mount retains ops/context/OEM/workspace data;
+;   the shared interface also retains its caller-owned owner/pool/handle state.
 ;   Required pointers must address their complete declared object/buffer; no
 ;   null-pointer probing is performed. Mount's OEM pointer and zero-length
 ;   FatTransfer.data may be null; structure/name/output pointers may not.
@@ -21,7 +24,7 @@
 ;   An entry/cursor must come from this identity at its current generation.
 ;   Do not edit bookkeeping, raw entry bytes, or cached geometry directly.
 ;
-; TRANSACTIONS: public mutations use begin/write/end only; no physical flush.
+; SNAPSHOT TRANSACTIONS: compatibility mutations use begin/write/end; no flush.
 ; A zero-length write only validates; all other accepted mutations transact.
 ; Acceptance and rollback both invalidate other snapshots.
 ; A failed mutation preserves its caller's entry/output and prior staged data,
@@ -34,9 +37,11 @@
 ; PUBLIC ENTRY POINTS (pointer arrows describe access, not ownership):
 ;
 ; fat_mount: RCX=FatIdentity* out/in-out, RDX=const SectorOps*,
-;            R8=const uint16_t OEM[256] or 0 (CP437).
+;            R8=const uint16_t OEM[256] or 0 (CP437), R9=const FatWorkspace*.
+;   Workspace data holds at least three provider sectors and outlives the mount;
+;   descriptor itself is borrowed only for this call. Reserved must be zero.
 ;   Zero identity before first use; do not remount during a transaction. Reads
-;   BPB and root chain. F_OK publishes geometry; failure leaves magic=0 and all
+;   primary BPB only. F_OK publishes geometry; failure leaves magic=0 and all
 ;   snapshots unusable. Provider extent begins at the FAT32 boot sector.
 ;
 ; fat_invalidate: RCX=FatIdentity* in-out; always F_OK, no I/O.
@@ -54,9 +59,12 @@
 ;   must contain valid data IDs and terminate at EOC without cycles. Output is
 ;   zeroed before traversal and remains {0,0} on error.
 ;
+; fat_count_free: RCX=FatIdentity*, RDX=uint32_t* out. Exact current selected
+;   FAT-view count, no FSInfo trust or cached promise. Unchanged output on error.
+;
 ; fat_dir_open: RCX=FatIdentity*, EDX=first directory cluster (not 0),
 ;               R8=FatCursor* out. Use identity.root_cluster for the root.
-;   Validate the full chain; initialize cursor only on F_OK. Output unchanged
+;   Check the first cluster ID, without I/O; initialize only on F_OK. Unchanged
 ;   on error. A numeric first cluster does not itself prove directory ownership.
 ;
 ; fat_dir_next: RCX=FatIdentity*, RDX=FatCursor* in-out, R8=FatEntry* out.
@@ -129,12 +137,16 @@ F_BUSY        := 12
 F_MEMORY      := 13
 F_NOTEMPTY    := 14
 F_ARGUMENT    := 15
+F_LIMIT       := 16           ; optional diagnostic stopped at caller's budget
+F_ATTENTION   := 17           ; dirty/error history, not proof of structural damage
+F_VERIFY      := 18           ; optional backend readback disagreed with written data
 
 F_MASK        := 0FFFFFFFh
 F_EOC         := 0FFFFFF8h
 F_LAST        := 0FFFFFFFh
 F_MAGIC       := 32335446h
 F_MAX_SECTOR  := 4096
+F_MAX_CLUSTER := 262144
 
 ; read/write: RCX=context, RDX=uint64 LBA, R8=sector buffer, EAX=F_* status.
 ; read buffer is writable; write buffer is readable. Exactly sector_bytes on
@@ -159,12 +171,20 @@ struct SectorOps
 	?flush          dq ?
 	?sectors        dq ?        ; bounded extent; sectors [0,sectors) exist
 	?sector_bytes   dd ?        ; power of two: 512, 1024, 2048, or 4096
-	?reserved       dd ?        ; caller sets zero
+	?reserved       dd ?        ; 0 for base, or sizeof.FatOrderedOps (see order.inc)
 ends
 
-; Format identity owns parsed geometry plus separate volume/FAT/directory
-; sector caches. Only the FAT32 library interprets or modifies these fields.
-; Zero before first mount. One identity per buffer, one serialized caller.
+; Three sector-sized regions: FAT cache, directory cache, operation scratch.
+; Mount borrows this descriptor for the call and retains data, not descriptor.
+struct FatWorkspace
+	?data dq ?
+	?bytes dd ?
+	?reserved dd ?
+ends
+
+; Geometry and cache ownership; three sector buffers are caller-sized and
+; supplied at mount. Only the library edits these fields. Zero before first
+; mount. One identity/shared owner per provider, serialized multiple consumers.
 struct FatIdentity
 	?ops            dq ?
 	?generation     dq ?
@@ -190,11 +210,11 @@ struct FatIdentity
 	?free_hint      dd ?
 	?serial         dd ?
 	?transaction    dd ?
-	?reserved       dd ?
-	?boot           db F_MAX_SECTOR dup ?
-	?fat            db F_MAX_SECTOR dup ?
-	?directory      db F_MAX_SECTOR dup ?
-	?scratch        db F_MAX_SECTOR dup ?
+	?completions    dd ?        ; private transaction counter for snapshot wrappers
+	?fat            dq ?
+	?directory      dq ?
+	?scratch        dq ?        ; primary boot sector uses scratch during mount
+	?shared         dq ?        ; attached FatVolume, or zero; library-owned
 ends
 
 ; An entry is a snapshot, including all 32 on-disk SFN bytes and a checked
@@ -213,6 +233,23 @@ struct FatEntry
 	?raw            db 32 dup ?
 	?name           dw 256 dup ?
 ends
+
+; Compact metadata prefix used by the shared owner. Names are enumeration
+; results, not permanent per-handle state. Field offsets match FatEntry.
+struct FatRecord
+	?generation     dq ?
+	?sector         dq ?
+	?index          dq ?
+	?parent         dd ?
+	?offset         dd ?
+	?cluster        dd ?
+	?size           dd ?
+	?lfn_count      dd ?
+	?name_length    dd ?
+	?raw            db 32 dup ?
+ends
+assert sizeof.FatRecord = FatEntry.name
+assert FatRecord.raw = FatEntry.raw
 
 ; Cursor persists across sector/cluster boundaries, including LFN fragments.
 struct FatCursor
@@ -259,7 +296,16 @@ struct FatCreate
 ends
 
 assert sizeof.SectorOps = 64
-assert FatIdentity.boot = 120
+assert FatIdentity.fat = 120
+assert sizeof.FatIdentity = 152
 assert sizeof.FatEntry = 592
 assert sizeof.FatCursor = 576
+include 'shared.inc'
+include 'check.inc'
+include 'order.inc'
+include 'stream.inc'
+include 'formatting.inc'
+include 'view.inc'
+include 'salvage.inc'
+include 'policy.inc'
 end if

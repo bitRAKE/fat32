@@ -16,19 +16,21 @@ and parameter contracts. This is a linkable example module, not a complete
 bootloader or firmware driver.
 
 Read [fat32.inc](../../fat32.inc) for the exact filesystem ABI and
-[API.md](../../API.md) for its function index. [DEVELOPING.md](../../DEVELOPING.md)
-describes the implementation; [VALIDATION.md](../../VALIDATION.md) records tests
+[API.md](../../docs/API.md) for its function index. [DEVELOPING.md](../../docs/DEVELOPING.md)
+describes the implementation; [VALIDATION.md](../../docs/VALIDATION.md) records tests
 and their limits.
 
-The library supports clusters through 64 KiB for this x86-64 target. See
-[64 KiB support](../../CLUSTER64.md) for arithmetic and validation coverage.
+The library supports clusters through 256 KiB for this x86-64 target, bounded
+by 128 sectors per cluster. See [formatting geometry](../../docs/FORMATTING.md)
+for the sector-size limits and [large-cluster coverage](../../docs/CLUSTER64.md)
+for validation evidence. Firmware boot compatibility is tested separately.
 Keep the backing volume stable against other writers while an identity caches
 its metadata; after external edits stop, invalidate and reacquire snapshots.
 
 Contents: [provider](#2-establish-the-sector-boundary),
 [ABI](#3-respect-the-abi-at-both-sides-of-the-call),
 [UEFI adapter](#4-a-small-read-only-uefi-adapter),
-[file access](#5-state-memory-and-file-access),
+[file access](#5-state-memory-and-shared-file-access),
 [writes](#6-add-writes-through-a-transactional-provider),
 [handoff](#7-plan-the-uefi-to-kernel-transition),
 [errors](#8-map-errors-and-metadata-deliberately),
@@ -70,17 +72,17 @@ loader mount; add a fresh kernel mount when your block driver is ready.
 Build the core from the repository root:
 
 ```cmd
-build.cmd example\uefi\reader.obj fat32.lib
-build.cmd examples-test
+tests\win32\build.cmd example\uefi\reader.obj fat32.lib
+tests\win32\build.cmd examples-test
 ```
 
 This builds `fat32.lib` and `example\uefi\reader.obj`. Link the example object
 and library with your own entry point and firmware setup. Both are AMD64 COFF.
 `examples-test` separately runs a host C mock of the firmware callback; it never
-accesses a physical device. Assembly declarations use `.inc`; `tests/api.h` is
-the separate C ABI mirror used by the host tests.
-The [Win32 demo](../win32/README.md), `win32.asm`, and
-`buffer.asm` are Windows-host components. In particular, the supplied sector
+accesses a physical device. Assembly declarations use `.inc`; `fat32.h` is
+the public C ABI used by the host mock.
+The [Win32 demo](../win32/README.md), `tests/win32/win32.asm`, and
+`tests/win32/buffer.asm` are Windows-host components. In particular, the supplied sector
 overlay uses `VirtualAlloc`/`VirtualFree`; it needs an allocator port or a
 replacement before use in an OS.
 
@@ -261,10 +263,7 @@ a new media ID under cached geometry.
 This wrapper publishes a read-only operations table and mounts it:
 
 ```asm
-; RCX=zeroed, unused FatIdentity*; RDX=validated GuideEfiRead*;
-; R8=caller-owned SectorOps* output, not attached to another live mount.
-; All three objects are distinct and remain live for the entire mount.
-; EAX=mount status; context validation/allocation is the loader's job.
+; RCX=zeroed identity*, RDX=context*, R8=ops*, R9=FatWorkspace*.
 proc guide_mount_readonly
     mov qword [r8 + SectorOps.context], rdx
     lea rax, [guide_efi_read]
@@ -278,100 +277,90 @@ proc guide_mount_readonly
     mov eax, dword [rdx + GuideEfiRead.block_bytes]
     mov dword [r8 + SectorOps.sector_bytes], eax
     mov dword [r8 + SectorOps.reserved], 0
-    fastcall fat_mount, rcx, r8, 0 ; RDX gets ops before R8 becomes null OEM
+    fastcall fat_mount, rcx, r8, 0, r9 ; caller passes FatWorkspace* as fourth arg
     ret
 endp
 ```
 
-`fat_mount` checks geometry and the root chain, then caches the BPB. A failed
+`fat_mount` reads the primary BPB and checks bounded geometry, then retains it. A failed
 mount leaves the identity unmounted. Do not infer writability or general media
 health from a successful mount: this is a local structural check, not an
 ownership scan of every cluster.
 
-## 5. State, memory, and file access
+## 5. State, memory, and shared file access
 
-Allocate identity storage outside a small kernel stack. Current sizes are:
+Mount takes a `FatWorkspace` descriptor as its fourth argument. Provide three
+sector-sized buffers (FAT cache, directory cache, scratch). The descriptor is
+borrowed for mount; its data outlives the mount. `FatIdentity` is now 152 bytes,
+plus 1,536 bytes of sector workspace on a 512-byte-sector volume. It no longer
+contains four maximum-sized buffers or a persistent boot-sector copy.
 
-| Object | Bytes | Intended lifetime |
-| --- | ---: | --- |
-| `SectorOps` | 64 | Entire mount |
-| `FatIdentity` | 16,504 | Entire mount; zero before first use |
-| `FatEntry` | 592 | Until invalidated, removed, or replaced |
-| `FatCursor` | 576 | One enumeration at the current generation |
-| `FatTransfer` | 24 | One transfer request; caller owns data storage |
+After mount, initialize a zeroed `FatVolume` with `fat_volume_init(volume,
+identity, objects, capacity)`, then acquire a root handle with `fat_root`.
+Each 128-byte object holds one canonical file/directory record; slot zero is the
+root. Each 48-byte handle has an independent position and access flags. Supply
+capacity for simultaneously open files and their pinned ancestor directories.
+One mounted owner serves every consumer. See [SHARED.md](../../docs/SHARED.md) for
+the full lifetime, reference, version, workspace and synchronization contract.
 
-Use `sizeof` and field constants from the header, rather than duplicating these
-sizes in code. Identity, provider context, optional OEM map, callbacks, and their
-backing pages must remain valid. The identity contains pointers and is not a
-serialized on-disk object. Copying its bytes to a new virtual address does not
-repair its provider pointers or update external users.
+Keep identity, workspace data, provider/context, object pool and owner storage
+live through all calls and suspended callbacks. Core routines allocate no heap
+memory but use stack locals; budget the library plus provider call chain.
+Operation-stack bounds and optional staging/stream storage are separate from
+the small identity and handle sizes.
 
-The core allocates no heap memory, but helpers use stack locals and nested calls.
-Budget stack for library **plus provider/driver** call chains. Existing test
-coverage is not a measured worst-case kernel stack bound. Do not place a 16 KiB
-identity on a small interrupt stack and then enter the library.
+### Read one component through a root handle
 
-### Read one component in the root
-
-Initialize `FatTransfer.data`, `.offset` in bytes, and `.length` in bytes. The
-destination must have that capacity and must not alias identity/provider state.
-The component is NUL-terminated UTF-16, for example `du 'kernel.bin',0`.
+Initialize `FatTransfer.data`, `.offset` and `.length`. The destination must
+have that capacity and must not alias library/provider state. The component
+is NUL-terminated UTF-16. This convenience example acquires and closes a file
+handle for one request; steady readers retain a handle and call `fat_read_at`
+or `fat_read_next` directly.
 
 ```asm
-; RCX=mounted identity*, RDX=UTF-16 root component, R8=FatTransfer*.
-; EAX=F_*; done=0 if lookup fails, otherwise fat_read's completed byte count.
-; Entry is private to this call; output data may contain a prefix on read error.
-proc guide_read_root_range uses rbx rsi
+; RCX=live root handle*, RDX=UTF-16 component, R8=FatTransfer*.
+proc guide_read_root_range uses rsi r12
     locals
-        entry FatEntry
+        opened FatHandle
     endl
 body:
-    mov rbx, rcx
     mov rsi, r8
-    mov r9, rdx                  ; preserve name before EDX becomes parent
+    mov qword [opened.volume], 0
     mov dword [rsi + FatTransfer.done], 0
-    fastcall fat_lookup, rcx, [rcx + FatIdentity.root_cluster], r9, addr entry
+    fastcall fat_open, rcx, rdx, FH_READ, addr opened
     test eax, eax
     jnz .done
-    fastcall fat_read, rbx, addr entry, rsi
+    fastcall fat_read_at, addr opened, rsi
+    mov r12d, eax
+    fastcall fat_close, addr opened
+    test r12d, r12d
+    cmovnz eax, r12d
 .done:
     ret
 endp
 ```
 
-On `F_OK`, advance by `.done`, not by the requested length. A zero count means
-EOF for a nonzero request at/past file end. A zero-length request also completes
-with zero. On failure, preserve the reported prefix for diagnostics or discard
-it according to your loader's policy; never treat it as a complete executable.
-Executable format checks and image authentication belong to the loader.
+Read completion reports actual bytes in `.done`, including a prefix on error.
+Zero at/past EOF is normal. Preserve or discard a failed prefix according to
+loader policy; never treat it as a complete executable. Format/authentication
+checks belong to the loader. Shared reads inspect the portion of the chain
+needed by the request and do not audit unused tails or reread entry identity
+on every call. Separately selected full validation is planned migration work.
 
-For repeated reads, keep the entry and call `fat_read` directly with successive
-offsets; the wrapper above intentionally repeats lookup for a simple example.
-The current library validates the full file chain for each public read. Many
-tiny reads of a large fragmented file repeat traversal work; choose a useful
-caller buffer size and measure your workload before adding an OS cache.
+### Paths and enumeration
 
-### Resolve paths and enumerate directories
+Use `fat_open(parent_handle, component, access, output_handle)` for each path
+component. Parent directories are checked by the library; hold the parent
+handles needed by your path layer, and close each acquired handle. The library
+does not split paths or normalize `.`/`..` for `fat_open`. It matches UTF-16
+LFNs or CP437 short aliases, folding ASCII case only.
 
-`fat_lookup` handles one component. To resolve `EFI\MYOS\kernel.bin`:
-
-1. Start with `identity.root_cluster`.
-2. Look up `EFI`; require `entry.raw[11] & 0x10`, then use `entry.cluster`.
-3. Look up `MYOS` in that directory and apply the same check.
-4. Look up `kernel.bin`; ordinary-file reads reject directory entries.
-
-Your path layer handles separators, root selection, `.`/`..`, and normalization.
-A dot-dot cluster of zero denotes root and must be translated to `root_cluster`.
-The root itself has no ordinary `FatEntry`.
-
-To enumerate, call `fat_dir_open(identity, first_cluster, cursor)` and then
-`fat_dir_next(identity, cursor, entry)` until `F_END`. Only `F_OK` supplies a
-usable entry; `F_END` is not an I/O error. Other errors may leave partial cursor
-or entry state. Reopen the cursor after diagnosing the failure.
-
-Names are UTF-16. ASCII case folds; non-ASCII code units compare exactly. Default
-SFN decoding uses CP437; another 256-word OEM mapping can be supplied at mount.
-Do not assume host-locale Unicode case folding or normalization.
+`fat_iter_open(directory, iterator)` acquires its own directory reference.
+Call `fat_iter_next(iterator, entry)` until `F_END`, then `fat_iter_close`.
+Only `F_OK` supplies an entry. Mutations of that directory's namespace stale
+its iterators; unrelated files/directories do not. An iterator may survive
+closing the handle from which it was opened. Output names live in the
+enumeration result, not every open handle.
 
 ## 6. Add writes through a transactional provider
 
@@ -393,7 +382,7 @@ Implement or port a format-neutral overlay with these rules:
 | Explicit OS commit | Write selected staged sectors, then request backend durability |
 | Explicit discard | Drop staged changes, then invalidate attached FAT32 caches |
 
-The supplied `buffer.asm` demonstrates versioned sector pages. Porting it means
+The supplied `tests/win32/buffer.asm` demonstrates versioned sector pages. Porting it means
 replacing host allocation/release calls and keeping its savepoint, rollback, and
 failure semantics. Allocation belongs in operations that can return `F_MEMORY`,
 not in the void `end` callback. Its linear version lookup and commit scans suit
@@ -408,9 +397,9 @@ explicit OS commit, but that does not make them one public filesystem operation.
 A useful sequence for an existing file is:
 
 ```text
-lookup current entry
-fat_write(identity, entry, transfer)       -> staged bytes and refreshed entry
-fat_set_info(identity, entry, stamp)       -> staged metadata and refreshed entry
+open or retain a shared handle
+fat_write_at(handle, transfer)            -> staged bytes and coherent metadata
+fat_handle_set_info(handle, stamp)        -> staged metadata visible to all handles
 OS commit overlay + backend durability    -> report durable completion
 ```
 
@@ -419,18 +408,19 @@ Choose whether to commit that earlier operation or discard the whole overlay.
 One rollback does not undo earlier accepted operations. Similarly, create
 followed by write is not a single atomic create-with-data operation.
 
-### Snapshot rules are part of your handle design
+### Shared handles across operations
 
-Every completed mutation transaction, including rollback, advances the identity
-generation. The successful mutation refreshes its supplied entry where the API
-promises that; other entries and cursors become stale. A failed mutation leaves
-caller bytes unchanged but may invalidate their generation. Reacquire after
-failure. A zero-length write validates without starting a transaction.
+Accepted mutations publish canonical metadata to all handles of that file.
+Unrelated files keep their versions; rollback preserves records and versions.
+Independent handle positions do not move because another consumer reads or
+writes. Rename preserves object identity. Unlink rejects open files/directories
+with `F_BUSY`; close all references before deleting. There is no open-unlinked
+lifetime. Root and ancestor pins are released as the final references close.
 
-`FatEntry` is a snapshot, not a durable POSIX-like open-file handle. Do not update
-its generation manually. Your VFS needs a refresh policy and serialization for
-name changes, slot reuse, and deletion. There is no library-provided stable inode
-number or open-unlinked-file lifetime. `fat_remove` frees the chain on acceptance.
+Do not implement a reopen-after-every-write layer. The compatibility snapshot
+functions in [API.md](../../docs/API.md) have a separate invalidation policy and must
+not be mixed with shared writers. External edits, remount, and uncertain commit
+require retiring the whole affected mount and starting a fresh coherent view.
 
 ### Durable completion and failure
 
@@ -468,8 +458,8 @@ For this library, a practical handoff sequence is:
    sequence. Do not use their mounted identities again.
 5. In the kernel, initialize your controller/block driver and independently
    identify the same partition. Check logical block geometry again.
-6. Allocate a kernel `SectorOps`, context, and zeroed `FatIdentity`; mount again.
-   Re-resolve names and open fresh cursors. Retire every loader snapshot.
+6. Allocate a kernel provider, sector workspace, identity and shared owner;
+   mount again and acquire fresh handles. Retire every loader handle.
 
 Fresh mount is a deliberate integration policy: it avoids retaining firmware
 pointers and cached bytes while ownership, addressing, and device transport
@@ -483,7 +473,8 @@ to the kernel provider. The FAT32 callback must still complete synchronously
 before returning, even if the underlying driver uses interrupts or DMA.
 
 There is no `fat_unmount` export. Your mount manager drains callers, resolves
-pending staging, retires snapshots, and releases the provider/state. Do not
+pending staging, closes handles, detaches the shared owner with
+`fat_volume_close`, and releases provider/workspace state. Do not
 equate zeroing `FatIdentity` with committing or discarding an overlay.
 
 ## 8. Map errors and metadata deliberately
@@ -529,7 +520,7 @@ concurrency policy in the core. These boundaries matter when mapping it to a VFS
 7. **Handoff:** make an attempted firmware-provider call after handoff fail in
    your mount manager; demonstrate kernel access through the new provider.
 
-The repository's `tests/test.c`, `tests/abi.asm`, and host USB harnesses provide
+The repository's `tests/win32/test.c`, `tests/win32/abi.asm`, and host USB harnesses provide
 examples and independent oracles. Existing evidence covers the FAT32 core with
 synthetic providers and Win32 media access. It does **not** establish that a new
 UEFI adapter, controller driver, or kernel allocator works.
@@ -538,7 +529,7 @@ UEFI adapter, controller driver, or kernel allocator works.
 and unwind data inspected. [test.c](test.c) checks it through a host mock:
 five-argument firmware dispatch, 64-bit LBA/status, aligned bounce with unaligned
 caller output, mount and cross-sector reads, EOF, bounds, read-only behavior,
-and offline/media-change errors. Run it with `build.cmd examples-test`.
+and offline/media-change errors. Run it with `tests\win32\build.cmd examples-test`.
 
 This is host verification, not a UEFI boot test. Discovery, allocation, exclusive
 ownership, and the actual handoff remain the OS developer's responsibility.

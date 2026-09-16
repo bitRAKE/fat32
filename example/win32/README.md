@@ -2,7 +2,8 @@
 
 [demo.asm](demo.asm) is a small CRT-free console client. It opens a FAT32 volume
 read-only, initializes the sector buffer, mounts the filesystem, and lists root
-entry names as UTF-8 through `fat_dir_open` / `fat_dir_next`. All filesystem
+entry names as UTF-8 through a shared root handle and `fat_iter_open` /
+`fat_iter_next`. All filesystem
 interpretation stays in `fat32.lib`.
 
 Set the `device` string in `demo.asm` to the intended volume before running.
@@ -12,14 +13,14 @@ elevated process, and the backing volume must remain stable while it is mounted.
 Build from the repository root:
 
 ```cmd
-build.cmd fatdemo.exe
+tests\win32\build.cmd fatdemo.exe
 ```
 
-This produces `fatdemo.exe` in the repository root and `demo.obj` / `demo.response`
-beside the source. Run the executable from an elevated console after selecting
+This produces `build/win32/fatdemo.exe`; `demo.obj` and `demo.response` are
+written beside the source. Run the executable from an elevated console after selecting
 the volume. It returns zero after enumeration or one on error; the error message
 points to the diagnostic USB harness.
 
-The demo links `fat32.lib`, `sector.lib`, and KERNEL32. See [buffer.inc](../../buffer.inc)
+The demo links `fat32.lib`, the test-only `build/win32/sector.lib`, and KERNEL32. See [buffer.inc](../../tests/win32/buffer.inc)
 for the Win32 provider and staging contracts, or the [UEFI example](../uefi/README.md)
 for a firmware-backed provider.

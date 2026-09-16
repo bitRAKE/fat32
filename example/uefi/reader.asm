@@ -5,14 +5,15 @@ include 'reader.inc'
 
 ; RCX=context*, RDX=volume LBA, R8=sector output -> EAX=F_*.
 public guide_efi_read
-; RCX=zeroed identity*, RDX=validated context*, R8=ops output -> EAX=F_*.
+; RCX=zeroed identity*, RDX=context*, R8=ops*, R9=FatWorkspace* -> EAX=F_*.
 public guide_mount_readonly
-; RCX=identity*, RDX=UTF-16 root component, R8=transfer* -> EAX=F_*.
+; RCX=root handle*, RDX=UTF-16 component, R8=transfer* -> EAX=F_*.
 public guide_read_root_range
 
 extrn fat_mount
-extrn fat_lookup
-extrn fat_read
+extrn fat_open
+extrn fat_read_at
+extrn fat_close
 
 ; RCX=initialized GuideEfiRead*, RDX=volume LBA, R8=sector output.
 ; EAX=F_*; output changes only after a successful complete firmware read.
@@ -47,7 +48,7 @@ proc guide_efi_read uses rbx rsi rdi
 	jmp .done
 endp
  ; RCX=zeroed, unused FatIdentity*; RDX=validated GuideEfiRead*;
-; R8=caller-owned SectorOps* output, not attached to another live mount.
+; R8=caller-owned SectorOps* output; R9=FatWorkspace* with three sectors.
 ; All three objects are distinct and remain live for the entire mount.
 ; EAX=mount status; context validation/allocation is the loader's job.
 proc guide_mount_readonly
@@ -63,25 +64,28 @@ proc guide_mount_readonly
 	mov eax, dword [rdx + GuideEfiRead.block_bytes]
 	mov dword [r8 + SectorOps.sector_bytes], eax
 	mov dword [r8 + SectorOps.reserved], 0
-	fastcall fat_mount, rcx, r8, 0 ; RDX gets ops before R8 becomes null OEM
+	fastcall fat_mount, rcx, r8, 0, r9 ; caller passes FatWorkspace* as fourth arg
 	ret
 endp
- ; RCX=mounted identity*, RDX=UTF-16 root component, R8=FatTransfer*.
-; EAX=F_*; done=0 if lookup fails, otherwise fat_read's completed byte count.
-; Entry is private to this call; output data may contain a prefix on read error.
-proc guide_read_root_range uses rbx rsi
+; RCX=live root handle*, RDX=UTF-16 component, R8=FatTransfer*.
+; This convenience helper opens/closes one local handle. Repeated streaming
+; callers retain their own handle and call fat_read_at directly.
+proc guide_read_root_range uses rsi r12
 	locals
-		entry FatEntry
+		opened FatHandle
 	endl
 body:
-	mov rbx, rcx
 	mov rsi, r8
-	mov r9, rdx                  ; preserve name before EDX becomes parent
+	mov qword [opened.volume], 0
 	mov dword [rsi + FatTransfer.done], 0
-	fastcall fat_lookup, rcx, [rcx + FatIdentity.root_cluster], r9, addr entry
+	fastcall fat_open, rcx, rdx, FH_READ, addr opened
 	test eax, eax
 	jnz .done
-	fastcall fat_read, rbx, addr entry, rsi
+	fastcall fat_read_at, addr opened, rsi
+	mov r12d, eax
+	fastcall fat_close, addr opened
+	test r12d, r12d
+	cmovnz eax, r12d
 .done:
 	ret
 endp

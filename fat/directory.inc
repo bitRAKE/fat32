@@ -2,13 +2,10 @@
 ; OEM table belongs to the caller; the deterministic default is CP437.
 
 ; RCX=mounted identity*, EDX=first directory cluster, R8=FatCursor* out.
-; EAX=status. Validate chain before initializing output; unchanged on error.
-; EDX stays live through the first call setup, while EDI keeps it across CALL.
+; EAX=status. Check the first ID and initialize without I/O. Each followed link
+; is checked by f_cursor_sector; full-chain diagnostics are optional.
+section '.text$fat_dir_open' code readable executable comdat any align 16
 proc fat_dir_open uses rbx rsi rdi
-	locals
-		chain dq ?
-	endl
-body:
 	mov rbx, rcx
 	mov rsi, r8
 	mov edi, edx
@@ -17,9 +14,10 @@ body:
 	jne .done
 	cmp edi, 2
 	jb .done
-	fastcall fat_chain, rcx, edx, addr chain
-	test eax, eax
-	jnz .done
+	mov ecx, [rbx + FatIdentity.cluster_count]
+	inc ecx
+	cmp edi, ecx
+	ja .done
 	mov edx, edi
 	mov rdi, rsi
 	xor eax, eax
@@ -40,6 +38,7 @@ endp
 ; Cursor must be from fat_dir_open. F_OK loads identity.directory and advances
 ; cluster/sector at boundaries, but does not consume a slot. Error may modify
 ; cursor; reopen instead of retrying it. Generation mismatch gives F_STALE.
+section '.text$f_cursor_sector' code readable executable comdat align 16
 proc f_cursor_sector uses rbx rsi
 	locals
 		next dd ?
@@ -100,6 +99,7 @@ endp
 ; checksum(raw SFN) -> AL. Private leaf.
 ; RCX=const uint8_t[11] SFN -> EAX=zero-extended 8-bit LFN checksum.
 ; Private leaf; advances RCX and clobbers EDX/flags. No F_* status return.
+section '.text$f_checksum' code readable executable comdat align 16
 proc f_checksum
 	xor eax, eax
 	mov edx, 11
@@ -116,6 +116,7 @@ endp
 ; RCX=identity*, RDX=FatEntry* with raw[0..12] initialized -> void.
 ; Write name/name_length from SFN/OEM/case flags; preserve raw bytes. R8/R9 are
 ; leaf-only map/index temporaries. RDI is saved for STOSW; EAX is unspecified.
+section '.text$f_short_name' code readable executable comdat align 16
 proc f_short_name uses rdi
 	lea rdi, [rdx + FatEntry.name]
 	mov r8, qword [rcx + FatIdentity.oem]
@@ -183,17 +184,17 @@ endp
 ; RCX=identity*, RDX=FatCursor* in-out, R8=FatEntry* out -> EAX=status.
 ; F_OK yields an entry; F_END means exhausted. Output/cursor can be partially
 ; changed on error. Caller must not use output unless F_OK; see fat32.inc.
-proc fat_dir_next uses rbx rsi rdi r12 r13 r14
+section '.text$fat_dir_next' code readable executable comdat any align 16
+proc fat_dir_next uses rbx rsi rdi rbp r13 r14
 	mov rbx, rcx
 	mov rsi, rdx
-	mov r12, r8
+	mov rbp, r8
 .scan:
 	fastcall f_cursor_sector, rbx, rsi
 	test eax, eax
 	jnz .done
 	mov edi, dword [rsi + FatCursor.offset]
-	add rdi, rbx
-	add rdi, FatIdentity.directory
+	add rdi, qword [rbx + FatIdentity.directory]
 	add dword [rsi + FatCursor.offset], 32
 	inc qword [rsi + FatCursor.index]
 	movzx eax, byte [rdi]
@@ -209,22 +210,22 @@ proc fat_dir_next uses rbx rsi rdi r12 r13 r14
 	jnz .reset
 	; Snapshot the complete short entry and its exact location.
 	mov rax, qword [rbx + FatIdentity.generation]
-	mov qword [r12 + FatEntry.generation], rax
+	mov qword [rbp + FatEntry.generation], rax
 	mov rax, qword [rbx + FatIdentity.dir_lba]
-	mov qword [r12 + FatEntry.sector], rax
+	mov qword [rbp + FatEntry.sector], rax
 	mov rax, qword [rsi + FatCursor.index]
 	dec rax
-	mov qword [r12 + FatEntry.index], rax
+	mov qword [rbp + FatEntry.index], rax
 	mov eax, dword [rsi + FatCursor.parent]
-	mov dword [r12 + FatEntry.parent], eax
+	mov dword [rbp + FatEntry.parent], eax
 	mov eax, dword [rsi + FatCursor.offset]
 	sub eax, 32
-	mov dword [r12 + FatEntry.offset], eax
+	mov dword [rbp + FatEntry.offset], eax
 	movzx eax, word [rdi+20]
 	shl eax, 16
 	mov ax, word [rdi+26]
 	and eax, F_MASK
-	mov dword [r12 + FatEntry.cluster], eax
+	mov dword [rbp + FatEntry.cluster], eax
 	; Nonempty files and ordinary directories need a data-cluster ID. Zero
 	; is valid for empty files and for a root parent in the dot-dot entry.
 	test eax, eax
@@ -245,12 +246,12 @@ proc fat_dir_next uses rbx rsi rdi r12 r13 r14
 	jne .corrupt
 .cluster_ok:
 	mov eax, dword [rdi+28]
-	mov dword [r12 + FatEntry.size], eax
+	mov dword [rbp + FatEntry.size], eax
 	iterate n, 0,8,16,24
 		mov rax, qword [rdi+n]
-		mov qword [r12 + FatEntry.raw+n], rax
+		mov qword [rbp + FatEntry.raw+n], rax
 	end iterate
-	mov dword [r12 + FatEntry.lfn_count], 0
+	mov dword [rbp + FatEntry.lfn_count], 0
 	cmp dword [rsi + FatCursor.lfn_next], 0
 	jne .short
 	cmp dword [rsi + FatCursor.lfn_count], 0
@@ -273,7 +274,7 @@ proc fat_dir_next uses rbx rsi rdi r12 r13 r14
 	je .short
 	cmp r13d, 255
 	jae .short
-	mov word [r12 + FatEntry.name+r13*2], ax
+	mov word [rbp + FatEntry.name+r13*2], ax
 	jmp .nextchar
 .terminate:
 	mov r14d, r13d
@@ -294,16 +295,16 @@ proc fat_dir_next uses rbx rsi rdi r12 r13 r14
 	jz .short
 	cmp r13d, 255
 	ja .short
-	mov word [r12 + FatEntry.name+r13*2], 0
-	mov dword [r12 + FatEntry.name_length], r13d
-	fastcall f_name_check, addr r12 + FatEntry.name
+	mov word [rbp + FatEntry.name+r13*2], 0
+	mov dword [rbp + FatEntry.name_length], r13d
+	fastcall f_name_check, addr rbp + FatEntry.name
 	test eax, eax
 	jnz .short
 	mov eax, dword [rsi + FatCursor.lfn_count]
-	mov dword [r12 + FatEntry.lfn_count], eax
+	mov dword [rbp + FatEntry.lfn_count], eax
 	jmp .entry
 .short:
-	fastcall f_short_name, rbx, r12
+	fastcall f_short_name, rbx, rbp
 .entry:
 	mov dword [rsi + FatCursor.lfn_count], 0
 	mov dword [rsi + FatCursor.lfn_next], 0
@@ -368,6 +369,7 @@ endp
 ; locale or silently apply an inappropriate Unicode/OEM case table.
 ; RCX/RDX=const NUL-terminated UTF-16 names -> EAX=1 equal, 0 different.
 ; Private leaf; pointers advance, R8/flags clobbered. No F_* status return.
+section '.text$f_name_equal' code readable executable comdat align 16
 proc f_name_equal
 .loop:
 	movzx eax, word [rcx]
@@ -402,6 +404,7 @@ endp
 ; RCX=identity*, EDX=parent cluster, R8=const UTF-16 component, R9=entry* out.
 ; EAX=status/F_NOTFOUND. Search LFN then SFN alias. Output is only valid on F_OK;
 ; failed searches can leave an intermediate entry. RSI/RDI retain name/output.
+section '.text$fat_lookup' code readable executable comdat any align 16
 proc fat_lookup uses rbx rsi rdi
 	locals
 		cursor FatCursor
@@ -448,7 +451,8 @@ endp
 ; R9=12-byte {uint64 sector; uint32 offset;}* out -> EAX=status.
 ; Caller prevalidates directory chain. Output may be partial on error; on F_OK
 ; offset is 32-byte aligned and sector identifies that on-disk slot.
-proc f_slot uses rbx rsi rdi r12
+section '.text$f_slot' code readable executable comdat align 16
+proc f_slot uses rbx rsi rdi rbp
 	locals
 		next dd ?
 	endl
@@ -468,16 +472,16 @@ body:
 	xor edx, edx
 	mov ecx, dword [rbx + FatIdentity.cluster_bytes]
 	div rcx
-	mov r12, rax
+	mov rbp, rax
 	mov eax, edx
 	xor edx, edx
 	div dword [rbx + FatIdentity.sector_bytes]
 	mov dword [rdi+8], edx
 	mov qword [rdi], rax
-	cmp r12d, [rbx + FatIdentity.cluster_count]
+	cmp ebp, [rbx + FatIdentity.cluster_count]
 	jae .bad
 .walk:
-	test r12, r12
+	test rbp, rbp
 	jz .sector
 	fastcall fat_get, rbx, esi, addr next
 	test eax, eax
@@ -489,7 +493,7 @@ body:
 	inc eax
 	cmp esi, eax
 	ja .bad
-	dec r12
+	dec rbp
 	jmp .walk
 .sector:
 	fastcall f_cluster_sector, rbx, esi
@@ -502,8 +506,9 @@ body:
 	jmp .done
 endp
 
-section '.rdata' data readable align 8
+section '.rdata$f_lfn_offsets' data readable comdat align 1
 f_lfn_offsets db 1,3,5,7,9,14,16,18,20,22,24,28,30
+section '.rdata$f_cp437' data readable comdat align 2
 f_cp437:
 	repeat 128, n:0
 		dw n
@@ -516,4 +521,3 @@ f_cp437:
 	dw 02568h,02564h,02565h,02559h,02558h,02552h,02553h,0256Bh,0256Ah,02518h,0250Ch,02588h,02584h,0258Ch,02590h,02580h
 	dw 003B1h,000DFh,00393h,003C0h,003A3h,003C3h,000B5h,003C4h,003A6h,00398h,003A9h,003B4h,0221Eh,003C6h,003B5h,02229h
 	dw 02261h,000B1h,02265h,02264h,02320h,02321h,000F7h,02248h,000B0h,02219h,000B7h,0221Ah,0207Fh,000B2h,025A0h,000A0h
-section '.text' code readable executable align 16
