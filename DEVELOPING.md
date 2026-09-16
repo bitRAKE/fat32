@@ -24,6 +24,8 @@ win32.asm                handle, sector geometry, lock, seek/read/write/flush
 example.asm              small CRT-free client
 tests/test.c             independent sparse-media fixtures and fault injection
 tests/usb.c              raw/native interoperability harness
+tests/repo.c             committed pair-write/delete workload and FAT chain readback
+tests/run-repo.ps1       immutable Git corpus export and independent blob comparisons
 tests/api.h              C ABI mirror
 ```
 

@@ -30,6 +30,9 @@ tests.exe: tests\test.c tests\api.h fat32.lib sector.lib
 usbcheck.exe: tests\usb.c tests\api.h fat32.lib sector.lib
 	cl /nologo /std:c17 /utf-8 /W4 /WX /Zi /Od /Fe:$@ tests\usb.c fat32.lib sector.lib kernel32.lib /link /incremental:no
 
+repocheck.exe: tests\repo.c tests\api.h fat32.lib sector.lib
+	cl /nologo /std:c17 /utf-8 /W4 /WX /Zi /Od /Fe:$@ tests\repo.c fat32.lib sector.lib kernel32.lib /link /incremental:no
+
 verify: all
 	"$(llvmbin)\llvm-readobj.exe" --unwind fat32.obj buffer.obj win32.obj
 	"$(llvmbin)\llvm-nm.exe" --undefined-only fat32.obj

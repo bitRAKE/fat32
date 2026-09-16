@@ -65,6 +65,7 @@ Outputs:
 | `fatdemo.exe` | CRT-free assembly example; lists X:'s root, read-only |
 | `tests.exe` | Synthetic, failure-injection, and Win32 sector-file tests |
 | `usbcheck.exe` | Compare raw file reads with normal Windows file reads |
+| `repocheck.exe` | Persisted fragmentation workload and raw readback for Git verification |
 
 `usbcheck X: --write-test` additionally creates an isolated, uniquely named test
 directory through the library. It checks raw creation, repeated flushes, a patch
@@ -79,6 +80,44 @@ staging sector changes. TESTING (X:) was reformatted from 64 KiB to **32 KiB**
 clusters and now passes the complete write test twice, 18 automated suites, and
 read-only CHKDSK. Logs, hashes, and the failure that led to the flush-lifetime fix
 are recorded in [VALIDATION.md](VALIDATION.md).
+
+### Repository fragmentation test
+
+Build `repocheck.exe` and `usbcheck.exe`, then run the PowerShell 7 driver with
+the current volume serial (eight hexadecimal digits) and a new evidence folder:
+
+```powershell
+.\build.cmd repocheck.exe usbcheck.exe
+.\tests\run-repo.ps1 -Drive X: -ExpectedSerial $VolumeSerial -Revision HEAD `
+  -EvidenceDirectory tests\evidence\2026-09-15-512b
+```
+
+The driver pins the commit, sorts all regular tracked files by blob size and
+path, and exports their exact committed bytes. The loop is:
+
+```text
+pass 1: write A, write B, delete A; write C, write D, delete C; ...
+pass 2: repeat over missing A, C, E, ...
+later:  repeat until none are missing; keep an unpaired final file
+```
+
+Each file write/deletion reaches an explicit physical commit. After closing and
+reopening the volume, the library records each actual FAT chain and reads each
+file back to local storage. Git hashes both that raw readback and a separate
+native Windows read; every result must equal its original blob ID. At least one
+final file must have multiple noncontiguous cluster extents. File-cluster
+ownership is checked across the copied files, and CHKDSK runs before and after.
+
+This test requires the named USB identity and **512-byte sectors/clusters**. It
+leaves every file under a unique `FAT32-repo-...` directory with the repository
+hierarchy preserved. It does not format the volume. The driver accepts up to
+4096 ordinary files of at most 16 MiB each and currently uses SHA-1 Git repos.
+
+Git's [blob IDs](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects) already
+identify committed file content. The test uses `git cat-file blob` and
+[`git hash-object --no-filters`](https://git-scm.com/docs/git-hash-object), so CRLF
+checkout conversion cannot hide changed bytes or produce false mismatches.
+Untracked build products and `.git` internals are outside the pinned tree.
 
 ## Contracts and scope
 
