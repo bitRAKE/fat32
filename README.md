@@ -83,6 +83,20 @@ test twice, 18 automated suites, and read-only CHKDSK. Logs, hashes, and the
 failure that led to the flush-lifetime fix
 are recorded in [VALIDATION.md](VALIDATION.md).
 
+### 64 KiB verification
+
+TESTING (X:) now uses 64 KiB clusters, serial `$VolumeSerial`. The fresh format passed
+native/raw file and metadata comparisons, library mutations, directory growth
+across the 64 KiB boundary, a locked independent FAT/hash oracle, immutable
+sector-capture replay, and CHKDSK. All **28 automated suites** also pass.
+See [the specification and failure investigation](CLUSTER64.md), including the
+initial transient unlocked-read failure and the limits of the historical evidence.
+
+`tests/run-64k.ps1` runs the guarded physical regression without formatting.
+`usbcheck X: --directory-test` exercises a Windows-created directory whose LFN
+set must cross into a newly allocated cluster. `tests/inspect-64k.py` captures a
+locked view for `usbcheck X: --capture sector-directory` to replay.
+
 ### Repository fragmentation test
 
 Build `repocheck.exe` and `usbcheck.exe`, then run the PowerShell 7 driver with
@@ -150,7 +164,8 @@ short-name decoding is CP437, with a caller-provided OEM table available at moun
 - [Unbuffered file I/O](https://learn.microsoft.com/en-us/windows/win32/fileio/file-buffering)
 - [Volume locking](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_lock_volume)
 
-The 64 KiB cluster case remains an intentional compatibility requirement from
-the original USB format. It exceeds the older specification's conservative
-32 KiB guidance. Physical read/write coverage now includes both 32 KiB and
-512-byte clusters.
+64 KiB clusters are documented by Microsoft's current formatter, although the
+older FAT specification explicitly discourages clusters above 32 KiB. This
+library supports the Windows geometry; firmware portability must be established
+separately. Physical read/write coverage includes 512-byte, 32 KiB and 64 KiB
+clusters. See [CLUSTER64.md](CLUSTER64.md) for primary sources and evidence.

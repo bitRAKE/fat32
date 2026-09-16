@@ -110,7 +110,8 @@ static void report(const char *s) { printf("  %s\n",s); fflush(stdout); ++tests;
 static void test_basic(unsigned bytes,unsigned spc) {
     Fixture *f=fixture(bytes,spc); FatEntry e,other; FatCursor cursor; FatTransfer t;
     unsigned char in[150123],out[150123],sector[4096]; unsigned i; uint32_t chain[2];
-    report("create / fragmented data / extend / truncate / metadata / delete");
+    report("create / data / extend / truncate / metadata / delete");
+    printf("    sector=%u sectors/cluster=%u cluster=%u\n",bytes,spc,bytes*spc);
     CHECK(f->id.cluster_bytes==bytes*spc); CHECK(f->id.cluster_count==65530);
     OK(fat_dir_open(&f->id,2,&cursor)); CHECK(fat_dir_next(&f->id,&cursor,&e)==F_END);
     e=create(f,2,U("Long file name Ω.bin"),0); CHECK(e.size==0 && e.lfn_count>0);
@@ -187,32 +188,106 @@ static void test_buffer(void) {
 static void raw_entry(unsigned char *p,const char *name,uint32_t cl,uint32_t size) {
     memset(p,0,32); memcpy(p,name,11); p[11]=0x20; wr16(p+20,cl>>16); wr16(p+26,cl); wr32(p+28,size);
 }
-static void test_fragmented(void) {
-    Fixture *f=fixture(512,1); Image *d=&f->disk; FatEntry e; FatTransfer t; uint32_t v;
-    unsigned char out[1200],in[1200],b[4096]; unsigned i;
+static void test_fragmented(unsigned bytes,unsigned spc) {
+    Fixture *f=fixture(bytes,spc); Image *d=&f->disk; FatEntry e; FatTransfer t; uint32_t v;
+    unsigned cb=bytes*spc,length=cb*2+176,middle=d->clusters+1;
+    unsigned char *out=malloc(length),*in=malloc(length),b[4096]; unsigned i,j;
     report("independently encoded fragmented chain / high nibble / mirror preservation");
-    raw_entry(page(d,d->data,1)->data,"FRAG    BIN",5,1200);
+    CHECK(out && in);
+    printf("    sector=%u cluster=%u chain=5,%u,8 middle-byte-offset=%llu\n",
+           bytes,cb,middle,(unsigned long long)(d->data+(uint64_t)(middle-2)*spc)*bytes);
+    raw_entry(page(d,d->data,1)->data,"FRAG    BIN",5,length);
     for(i=0;i<2;i++) {
         uint32_t high=(i+10)<<28;
-        fat_value(d,i,3,high); fat_value(d,i,5,high|19); fat_value(d,i,19,high|8); fat_value(d,i,8,high|0x0FFFFFFF);
+        fat_value(d,i,3,high); fat_value(d,i,5,high|middle); fat_value(d,i,middle,high|8); fat_value(d,i,8,high|0x0FFFFFFF);
     }
-    memset(page(d,d->data+3,1)->data,0x11,512);
-    memset(page(d,d->data+17,1)->data,0x22,512);
-    memset(page(d,d->data+6,1)->data,0x33,512);
+    for(j=0;j<spc;j++) {
+        memset(page(d,d->data+(uint64_t)3*spc+j,1)->data,0x11,bytes);
+        memset(page(d,d->data+(uint64_t)(middle-2)*spc+j,1)->data,0x22,bytes);
+        memset(page(d,d->data+(uint64_t)6*spc+j,1)->data,0x33,bytes);
+    }
     OK(fat_mount(&f->id,&f->fault,NULL)); e=lookup(f,2,U("frag.bin"));
-    t=(FatTransfer){out,0,sizeof(out),0}; OK(fat_read(&f->id,&e,&t));
-    for(i=0;i<1200;i++) CHECK(out[i]==(i<512?0x11:i<1024?0x22:0x33));
-    memset(in,0xA9,sizeof(in)); t=(FatTransfer){in,499,700,0}; OK(fat_write(&f->id,&e,&t));
-    t=(FatTransfer){out,0,sizeof(out),0}; OK(fat_read(&f->id,&e,&t));
-    CHECK(out[498]==0x11 && out[499]==0xA9 && out[1198]==0xA9 && out[1199]==0x33);
-    OK(fat_resize(&f->id,&e,2000));
+    t=(FatTransfer){out,0,length,0}; OK(fat_read(&f->id,&e,&t)); CHECK(t.done==length);
+    for(i=0;i<length;i++) CHECK(out[i]==(i<cb?0x11:i<cb*2?0x22:0x33));
+    memset(in,0xA9,length); t=(FatTransfer){in,cb-13,cb+188,0}; OK(fat_write(&f->id,&e,&t));
+    t=(FatTransfer){out,0,length,0}; OK(fat_read(&f->id,&e,&t));
+    for(i=0;i<length;i++) CHECK(out[i]==(i<cb-13?0x11:i<length-1?0xA9:0x33));
+    /* Inspect committed sectors independently, including the last sector of
+       the first cluster and the backward link out of the high cluster. */
+    OK(sb_commit(&f->buffer));
+    for(i=0;i<length;i++) {
+        unsigned c=i/cb,k=i%cb; uint32_t cl=c==0?5:c==1?middle:8;
+        Page *p=page(d,d->data+(uint64_t)(cl-2)*spc+k/bytes,0);
+        CHECK(p && p->data[k%bytes]==out[i]);
+    }
+    OK(fat_resize(&f->id,&e,cb*4-48));
     for(i=0;i<2;i++) {
         OK(sb_read(&f->buffer,32+(uint64_t)i*d->fat_sectors,b));
         CHECK((rd32(b+3*4)&0xF0000000)==(i+10)<<28);
         CHECK((rd32(b+8*4)&0xF0000000)==(i+10)<<28);
         CHECK((rd32(b+8*4)&0x0FFFFFFF)==3);
     }
-    OK(fat_resize(&f->id,&e,0)); OK(fat_get(&f->id,19,&v)); CHECK(v==0);
+    OK(fat_resize(&f->id,&e,0)); OK(fat_get(&f->id,middle,&v)); CHECK(v==0);
+    free(in); free(out); destroy(f);
+}
+static void test_large_directory(unsigned bytes,unsigned spc) {
+    Fixture *f=fixture(bytes,spc); Image *d=&f->disk; FatEntry e,found;
+    FatCursor cursor; uint16_t name[256]; uint32_t chain[2]; unsigned i,count=0;
+    unsigned slots=bytes*spc/32; char short_name[12];
+    report("64 KiB directory / LFN crossing final sector / grow / rename / delete");
+    printf("    sector=%u sectors/cluster=%u directory slots=%u\n",bytes,spc,slots);
+    /* Independently fill all but the final slot; no deleted slots can absorb
+       the new 20-LFN + SFN set. This forces allocation while writing that set. */
+    for(i=0;i<slots-1;i++) {
+        sprintf_s(short_name,sizeof(short_name),"N%07uBIN",i);
+        raw_entry(page(d,d->data+(uint64_t)i*32/bytes,1)->data+i*32%bytes,short_name,0,0);
+    }
+    for(i=0;i<255;i++) name[i]=(uint16_t)('a'+i%26); name[255]=0;
+    OK(fat_invalidate(&f->id)); e=create(f,2,name,0);
+    CHECK(e.lfn_count==20 && e.index==slots+19);
+    OK(fat_chain(&f->id,2,chain)); CHECK(chain[0]==2);
+    OK(sb_commit(&f->buffer)); OK(fat_mount(&f->id,&f->fault,NULL));
+    found=lookup(f,2,name); CHECK(found.index==e.index && found.name_length==255);
+    OK(fat_dir_open(&f->id,2,&cursor));
+    while(fat_dir_next(&f->id,&cursor,&e)==F_OK) ++count;
+    CHECK(count==slots); CHECK(cursor.ended);
+    OK(fat_rename(&f->id,&found,U("Renamed across 64KiB Ω.bin")));
+    OK(fat_remove(&f->id,&found)); OK(sb_commit(&f->buffer));
+    OK(fat_mount(&f->id,&f->fault,NULL));
+    CHECK(fat_lookup(&f->id,2,U("Renamed across 64KiB Ω.bin"),&found)==F_NOTFOUND);
+    e=lookup(f,2,U("N0002046.BIN")); CHECK(e.index==2046);
+    destroy(f);
+}
+static void test_boot_in_directory(unsigned spc) {
+    Fixture *f=fixture(512,spc); FatEntry e; FatCursor cursor; unsigned char *p;
+    report("boot-sector bytes in directory rejected independently of cluster size");
+    printf("    sector=512 cluster=%u decoded invalid cluster=134217983\n",512*spc);
+    /* Reproduce the recorded byte pattern, not an unavailable original image.
+       Both geometries mount; only directory interpretation must fail. */
+    p=page(&f->disk,f->disk.data,1)->data;
+    memcpy(p,page(&f->disk,0,0)->data,512); memcpy(p+3,"MSDOS5.0",8); wr16(p+26,255);
+    CHECK((((uint32_t)rd16(p+20)<<16)|rd16(p+26))%0x10000000==134217983);
+    OK(fat_invalidate(&f->id)); OK(fat_dir_open(&f->id,2,&cursor));
+    CHECK(fat_dir_next(&f->id,&cursor,&e)==F_CORRUPT);
+    CHECK(f->disk.writes==0); destroy(f);
+}
+static void test_external_cache_change(unsigned spc) {
+    Fixture *f=fixture(512,spc); Image *d=&f->disk; FatEntry e;
+    unsigned char out=0; FatTransfer transfer={&out,0,1,0}; unsigned i;
+    report("external FAT change / stale read cache / explicit quiescent invalidation");
+    /* Mount cached FAT[3]==free while validating root cluster 2. An external
+       writer now publishes a valid file, outside the library's generation. */
+    CHECK(f->id.fat_lba==32 && rd32(f->id.fat+12)==0);
+    for(i=0;i<2;i++) fat_value(d,i,3,0xFFFFFFF);
+    raw_entry(page(d,d->data,1)->data,"EXTERNALBIN",3,1);
+    page(d,d->data+spc,1)->data[0]=0xA7;
+    e=lookup(f,2,U("EXTERNAL.BIN"));
+    CHECK(fat_read(&f->id,&e,&transfer)==F_CORRUPT && transfer.done==0);
+    /* Once the external writer has stopped, invalidate and reacquire entries.
+       This controlled reproduction is not proof of the USB failure's cause. */
+    OK(fat_invalidate(&f->id)); e=lookup(f,2,U("EXTERNAL.BIN"));
+    OK(fat_read(&f->id,&e,&transfer)); CHECK(transfer.done==1 && out==0xA7);
+    printf("    cluster=%u cached-free -> F_CORRUPT; invalidate/relookup -> F_OK\n",512*spc);
     destroy(f);
 }
 static void test_active_fat(void) {
@@ -392,7 +467,11 @@ static void test_abi(void) {
 int main(void) {
     printf("FAT32 verification (assembly library, synthetic sparse sector backends)\n");
     test_geometry(); test_buffer(); test_basic(512,1); test_basic(512,64); test_basic(512,128); test_basic(4096,16);
-    test_directories(); test_rollback(); test_fragmented(); test_active_fat(); test_no_space(); test_invalid_names();
+    test_directories(); test_rollback(); test_fragmented(512,1); test_fragmented(512,128); test_fragmented(4096,16);
+    test_large_directory(512,128); test_large_directory(4096,16);
+    test_boot_in_directory(1); test_boot_in_directory(64); test_boot_in_directory(128);
+    test_external_cache_change(1); test_external_cache_change(128);
+    test_active_fat(); test_no_space(); test_invalid_names();
     test_corruption(); test_win32_io(); test_rename(); test_lfn_damage(); test_mutation_rollback(); test_media_errors(); test_abi();
     printf("PASS: %u suites\n",tests); return 0;
 }

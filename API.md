@@ -18,6 +18,16 @@ storage; transfer data must address `length` bytes and must not alias library
 state. Component strings must be NUL-terminated UTF-16. A zero-length transfer
 may use a null data pointer. Other null allowances are stated explicitly.
 
+The backing volume must also remain stable against external writers. Serializing
+calls to one identity does not serialize Windows or another filesystem driver.
+An unlocked raw reader can observe an old cached FAT and a newly written
+directory, returning `F_CORRUPT` even though a later consistent view is valid.
+Use exclusive ownership or an immutable snapshot for filesystem diagnosis.
+After external edits stop, call `fat_invalidate` and reacquire entries/cursors;
+remount after geometry or media changes. Repeated invalidation cannot make
+concurrent external edits into a consistent snapshot. `win_open(...,0)` is an
+unlocked read handle; writable mode holds the Win32 volume lock.
+
 Callbacks may overwrite all Win64 volatile registers. Assembly callers must
 provide the 32-byte home area and align RSP to 16 bytes before CALL; nonvolatile
 registers are preserved. Private `f_*` helpers document any additional register

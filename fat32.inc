@@ -14,6 +14,9 @@
 ;   Inputs/outputs must not overlap each other or identity/cache/provider state.
 ;   The caller owns all storage. Keep identity.ops, context, and OEM map alive
 ;   through unmount/replacement; serialize all use of one identity/provider.
+;   The backing volume must stay stable against external writers while mounted.
+;   Serialization here cannot exclude another filesystem driver. After external
+;   edits stop, invalidate/reacquire entries; remount if geometry/media changed.
 ;   Except mount/invalidate, calls require a successfully mounted identity.
 ;   An entry/cursor must come from this identity at its current generation.
 ;   Do not edit bookkeeping, raw entry bytes, or cached geometry directly.

@@ -31,9 +31,15 @@ tests/abi.asm            nonvolatile probes and volatile-clobbering callbacks
 tests/usb.c              raw/native interoperability harness
 tests/repo.c             committed pair-write/delete workload and FAT chain readback
 tests/run-repo.ps1       immutable Git corpus export and independent blob comparisons
+tests/run-64k.ps1        guarded 64 KiB native fixtures and physical mutation checks
+tests/inspect-64k.py     independent locked FAT/hash oracle and sparse sector capture
 tests/api.h              C ABI mirror
 examples/uefi/           OS guide, assembly reader, and host firmware mock
 ```
+
+For the 64 KiB specification boundary, failure analysis, and capture-replay
+workflow, see [CLUSTER64.md](CLUSTER64.md). An unlocked live-volume read is not a
+consistent filesystem snapshot; raw/native comparisons assume stable contents.
 
 `nmake` produces `fat32.lib`, `sector.lib`, and `fatdemo.exe`. Test harnesses use
 the C runtime; the production libraries do not. `fatdemo.exe` imports only

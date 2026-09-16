@@ -20,6 +20,13 @@ Read [fat32.inc](../../fat32.inc) for the exact filesystem ABI and
 describes the implementation; [VALIDATION.md](../../VALIDATION.md) records tests
 and their limits.
 
+The library accepts clusters through 64 KiB, including Windows-formatted media.
+The older FAT specification discourages clusters above 32 KiB, and Windows
+compatibility does not establish firmware bootability. See
+[the 64 KiB investigation](../../CLUSTER64.md) for primary sources and tests.
+Keep the backing volume stable against other writers while an identity caches
+its metadata; after external edits stop, invalidate and reacquire snapshots.
+
 Contents: [provider](#2-establish-the-sector-boundary),
 [ABI](#3-respect-the-abi-at-both-sides-of-the-call),
 [UEFI adapter](#4-a-small-read-only-uefi-adapter),

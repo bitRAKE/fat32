@@ -41,6 +41,8 @@
 ;   borrowed only for this call. F_OK publishes sector callbacks/extent. Failed
 ;   open cleans up and returns F_IO; volume.error records Win32 status. No retry.
 ;   Writable mode holds the lock through explicit flush and close/dismount.
+;   Read-only mode does not lock or snapshot: another filesystem driver may
+;   change sectors independently of this handle and stale FAT identity caches.
 ; win_close: RCX=WinVolume* previously opened/failed-open/closed -> F_OK or F_IO.
 ;   Dismount locked volume, close handle, free bounce buffer; never commit/flush.
 ;   Attempts cleanup after failure and records first dismount/close error.
