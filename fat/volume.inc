@@ -1,6 +1,9 @@
 ; Geometry, bounded FAT access, and transaction/cache coherence.
-; Internal calls use the same ABI as public calls. EAX is always a status.
+; Internal calls use Win64 too. EAX is a status except where stated explicitly.
 
+; RCX=FatIdentity* in-out -> EAX=F_OK. No I/O; increment generation and drop
+; FAT/directory cache keys plus allocation hints. Caller serializes/disallows an
+; active operation; mount uses this before publishing magic.
 proc fat_invalidate
 	mov qword [rcx + FatIdentity.fat_lba], -1
 	mov qword [rcx + FatIdentity.dir_lba], -1
@@ -12,6 +15,9 @@ proc fat_invalidate
 endp
 
 ; mount(identity, ops, OEM_map_or_null). Failed mounts leave magic clear.
+; RCX=FatIdentity* out, RDX=const SectorOps*, R8=OEM uint16_t[256] or 0.
+; EAX=status; F_OK publishes a mounted identity, failure leaves magic=0. Only
+; ops/OEM lifetime is retained. All pointers valid; see fat32.h for full contract.
 proc fat_mount uses rbx rsi rdi
 	mov rbx, rcx
 	mov rsi, rdx
@@ -19,7 +25,7 @@ proc fat_mount uses rbx rsi rdi
 	mov dword [rbx + FatIdentity.magic], 0
 	mov dword [rbx + FatIdentity.transaction], 0
 	mov qword [rbx + FatIdentity.ops], rsi
-	fastcall fat_invalidate, rbx
+	fastcall fat_invalidate, rcx
 	mov eax, dword [rsi + SectorOps.sector_bytes]
 	cmp eax, 512
 	jb .format
@@ -142,7 +148,7 @@ proc fat_mount uses rbx rsi rdi
 	test eax, eax
 	jnz .failed
 	xor eax, eax
-	ret
+	jmp .done
 .format:
 	mov eax, F_FORMAT
 .failed:
@@ -151,44 +157,49 @@ proc fat_mount uses rbx rsi rdi
 	ret
 endp
 
-proc f_read_sector uses rbx
-	mov rbx, qword [rcx + FatIdentity.ops]
-	cmp rdx, [rbx + SectorOps.sectors]
-	jae .range
-	fastcall [rbx + SectorOps.read], [rbx + SectorOps.context], rdx, r8
-	ret
-.range:
+; RCX=identity*, RDX=relative uint64 LBA, R8=writable sector_bytes buffer.
+; EAX=status; bounded by provider extent. Output on error follows provider.
+; R9 dispatch is consumed before CALL; nothing depends on it after callback.
+proc f_read_sector
+	mov r9, qword [rcx + FatIdentity.ops]
 	mov eax, F_RANGE
+	cmp rdx, [r9 + SectorOps.sectors]
+	jae .done
+	fastcall [r9 + SectorOps.read], [r9 + SectorOps.context], rdx, r8
+.done:
 	ret
 endp
 
-proc f_write_sector uses rbx
+; RCX=identity*, RDX=relative uint64 LBA, R8=readable complete sector.
+; Requires active transaction and LBA < total_sectors. EAX=status; invalidate
+; both cache keys before staging. Input may be an identity cache/scratch sector.
+proc f_write_sector
+	mov eax, F_BUSY
 	cmp dword [rcx + FatIdentity.transaction], 1
-	jne .busy
-	mov eax, dword [rcx + FatIdentity.total_sectors]
-	cmp rdx, rax
-	jae .range
+	jne .done
+	mov r9d, dword [rcx + FatIdentity.total_sectors]
+	mov eax, F_RANGE
+	cmp rdx, r9
+	jae .done
 	mov qword [rcx + FatIdentity.fat_lba], -1
 	mov qword [rcx + FatIdentity.dir_lba], -1
-	mov rbx, qword [rcx + FatIdentity.ops]
-	fastcall [rbx + SectorOps.write], [rbx + SectorOps.context], rdx, r8
-	ret
-.range:
-	mov eax, F_RANGE
-	ret
-.busy:
-	mov eax, F_BUSY
+	mov r9, qword [rcx + FatIdentity.ops]
+	fastcall [r9 + SectorOps.write], [r9 + SectorOps.context], rdx, r8
+.done:
 	ret
 endp
 
 ; Cached directory sector. Pointer is identity.directory after success.
+; RCX=identity*, RDX=directory-sector LBA -> EAX=status.
+; F_OK makes identity.directory contain that sector; no pointer return. A failed
+; read leaves dir_lba invalid. Cached bytes are borrowed until the next I/O.
 proc f_directory uses rbx rsi
 	mov rbx, rcx
 	mov rsi, rdx
 	cmp rdx, [rbx + FatIdentity.dir_lba]
 	je .hit
 	mov qword [rbx + FatIdentity.dir_lba], -1
-	fastcall f_read_sector, rbx, rsi, addr rbx + FatIdentity.directory
+	fastcall f_read_sector, rcx, rdx, addr rcx + FatIdentity.directory
 	test eax, eax
 	jnz .done
 	mov qword [rbx + FatIdentity.dir_lba], rsi
@@ -199,6 +210,9 @@ proc f_directory uses rbx rsi
 endp
 
 ; fat_get(identity, cluster, out32), including reserved FAT[0] and FAT[1].
+; RCX=mounted identity*, EDX=FAT index, R8=uint32_t* out -> EAX=status.
+; F_OK writes low 28 bits; output unchanged on failure. FAT[0]/FAT[1] allowed.
+; RBX/RSI/RDI retain identity/output/byte offset across the sector callback.
 proc fat_get uses rbx rsi rdi
 	mov rbx, rcx
 	mov rsi, r8
@@ -229,17 +243,22 @@ proc fat_get uses rbx rsi rdi
 	and eax, F_MASK
 	mov dword [rsi], eax
 	xor eax, eax
+.done:
 	ret
 .failed:
 	mov qword [rbx + FatIdentity.fat_lba], -1
-	ret
+	jmp .done
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 endp
 
 ; Internal setter preserves the reserved high nibble independently in every
 ; FAT copy. Disabled mirroring touches only the selected active FAT.
+; RCX=identity*, EDX=FAT index, R8D=new masked 28-bit value -> EAX=status.
+; Active transaction required. Preserve each mirror's high nibble; reject low-bit
+; disagreement. Any partial staging is rolled back by the caller's f_finish.
+; Every exit invalidates fat_lba because the cache payload may hold another copy.
 proc f_put uses rbx rsi rdi r12 r13
 	locals
 		part dq ?
@@ -250,7 +269,7 @@ body:
 	mov rbx, rcx
 	mov r12d, r8d
 	mov dword [cluster_id], edx
-	fastcall fat_get, rbx, edx, addr old_value
+	fastcall fat_get, rcx, edx, addr old_value
 	test eax, eax
 	jnz .done
 	mov edx, dword [cluster_id]
@@ -303,10 +322,13 @@ body:
 	ret
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 endp
 
 ; Map a data cluster to a relative sector. Private leaf: EDX -> RAX.
+; RCX=identity*, EDX=prevalidated data cluster -> RAX=uint64 relative LBA.
+; Private leaf exception: preserves RCX (relied on at adjacent call sites),
+; clobbers EDX/flags. No range check and no F_* status return.
 proc f_cluster_sector
 	lea eax, [edx-2]
 	mov edx, dword [rcx + FatIdentity.cluster_sectors]
@@ -318,6 +340,9 @@ endp
 
 ; fat_chain(identity, first, {count,last}). Brent's cycle detector bounds a
 ; corrupt loop without allocating a volume-sized visited bitmap.
+; RCX=mounted identity*, EDX=first or 0, R8=uint32_t[2]* out.
+; EAX=status. Zero output first; publish {count,last} only at valid EOC. First=0
+; is empty/F_OK. All checkpoint/count state must survive calls to fat_get.
 proc fat_chain uses rbx rsi rdi r12 r13 r14 r15
 	locals
 		next dd ?
@@ -371,41 +396,41 @@ body:
 	ret
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 endp
 
-proc f_begin uses rbx rsi
+; RCX=identity* -> EAX=status. Require mounted, idle, writable provider.
+; Set identity.transaction only after successful begin callback; on failure no
+; finish is due. RDX holds ops only until callback dispatch; RBX survives it.
+proc f_begin uses rbx
 	mov rbx, rcx
+	mov eax, F_FORMAT
 	cmp dword [rbx + FatIdentity.magic], F_MAGIC
-	jne .bad
+	jne .done
+	mov eax, F_BUSY
 	cmp dword [rbx + FatIdentity.transaction], 0
-	jne .busy
-	mov rsi, qword [rbx + FatIdentity.ops]
-	cmp qword [rsi + SectorOps.write], 0
-	je .ro
-	cmp qword [rsi + SectorOps.begin], 0
-	je .ro
-	cmp qword [rsi + SectorOps.end], 0
-	je .ro
-	fastcall [rsi + SectorOps.begin], [rsi + SectorOps.context]
+	jne .done
+	mov rdx, qword [rbx + FatIdentity.ops]
+	mov eax, F_READONLY
+	cmp qword [rdx + SectorOps.write], 0
+	je .done
+	cmp qword [rdx + SectorOps.begin], 0
+	je .done
+	cmp qword [rdx + SectorOps.end], 0
+	je .done
+	fastcall [rdx + SectorOps.begin], [rdx + SectorOps.context]
 	test eax, eax
 	jnz .done
 	mov dword [rbx + FatIdentity.transaction], 1
 .done:
 	ret
-.ro:
-	mov eax, F_READONLY
-	ret
-.busy:
-	mov eax, F_BUSY
-	ret
-.bad:
-	mov eax, F_FORMAT
-	ret
 endp
 
 ; FSInfo is advisory. Never turn a stale free-count hint into ENOSPC.
 ; Invalidate both valid primary and backup hints after allocation changes.
+; RCX=identity* with active transaction -> EAX=status.
+; Set free/next hints unknown in valid primary/backup FSInfo sectors. Invalid or
+; absent signatures are skipped. Uses/destroys identity.scratch.
 proc f_info_unknown uses rbx rsi rdi
 	mov rbx, rcx
 	mov esi, dword [rbx + FatIdentity.fsinfo]
@@ -444,19 +469,22 @@ endp
 
 ; finish(identity, status) publishes or rolls back the complete operation.
 ; Every finish invalidates snapshots, including after a rollback.
-proc f_finish uses rbx rsi rdi
+; RCX=identity*, EDX=operation status; matching successful f_begin required.
+; EAX=operation/FSInfo status. Accept only F_OK, otherwise rollback; always end
+; the savepoint and invalidate snapshots. end callback is void/cannot fail.
+proc f_finish uses rbx rdi
 	mov rbx, rcx
 	mov edi, edx
 	test edi, edi
 	jnz .end
-	fastcall f_info_unknown, rbx
+	fastcall f_info_unknown, rcx
 	mov edi, eax
 .end:
-	mov rsi, qword [rbx + FatIdentity.ops]
+	mov r8, qword [rbx + FatIdentity.ops]
 	xor edx, edx
 	test edi, edi
 	setz dl
-	fastcall [rsi + SectorOps.end], [rsi + SectorOps.context], edx
+	fastcall [r8 + SectorOps.end], [r8 + SectorOps.context], edx
 	mov dword [rbx + FatIdentity.transaction], 0
 	fastcall fat_invalidate, rbx
 	mov eax, edi
@@ -465,6 +493,10 @@ endp
 
 ; Allocate one zero-filled cluster. Each failed write is rolled back by the
 ; caller's transaction; output is assigned only after the cluster is ready.
+; RCX=identity*, RDX=uint32_t* out cluster -> EAX=status.
+; Active transaction required. F_OK allocates EOC, zeroes all cluster sectors,
+; publishes output and leaves scratch[0..sector_bytes) zero. Failure leaves out
+; unchanged; caller must roll back partially staged FAT/data with f_finish.
 proc f_allocate uses rbx rsi rdi r12 r13
 	locals
 		value dd ?
@@ -490,7 +522,7 @@ body:
 	dec r12d
 	jnz .scan
 	mov eax, F_NOSPACE
-	ret
+	jmp .done
 .found:
 	fastcall f_put, rbx, edi, F_LAST
 	test eax, eax
@@ -527,6 +559,9 @@ endp
 
 ; Free a prevalidated finite chain; caller has already checked ownership of
 ; its entry and must not pass the root or any shared directory chain.
+; RCX=identity*, EDX=first or 0 -> EAX=status. Active transaction required.
+; Caller has validated the entire chain and ownership; 0 is a no-op. Stages FAT
+; entries as free; caller handles rollback on error. Does not erase data bytes.
 proc f_free uses rbx rsi
 	locals
 		next dd ?

@@ -2,6 +2,9 @@
 ; the sector layer never sees a name, cluster number, or directory entry.
 
 ; Validate a NUL-terminated component; EDX receives length on success.
+; RCX=const NUL-terminated UTF-16 component -> EAX=status, EDX=length on F_OK.
+; Private leaf; rejects malformed pairs, forbidden chars, empty/overlong names,
+; trailing dot/space. R9/flags clobbered; length unspecified on error.
 proc f_name_check
 	xor edx, edx
 	xor r9d, r9d            ; pending high surrogate
@@ -57,6 +60,9 @@ endp
 
 ; Find a unique legal SFN alias, checking raw aliases AND visible LFN names.
 ; F0000001 .. FFFFFFFF: no locale-dependent lossy Unicode conversion.
+; RCX=identity*, EDX=parent first cluster, R8=11-byte writable SFN buffer.
+; EAX=status. Search candidate aliases against raw SFN and decoded LFN names;
+; publish only on success. Caller has mounted/readable parent; no I/O writes.
 proc f_alias uses rbx rsi rdi r12 r13
 	locals
 		cursor FatCursor
@@ -119,7 +125,7 @@ body:
 	cmp esi, 0FFFFFFFh
 	jbe .candidate
 	mov eax, F_NOSPACE
-	ret
+	jmp .done
 .free:
 	lea rsi, [alias.raw]
 	mov rdi, r13
@@ -133,7 +139,11 @@ endp
 ; Find a contiguous logical slot run, extending a full directory as needed.
 ; Return {start qword, consumed_end dword}; a new end marker is written after
 ; creation if a following allocated slot exists.
-proc f_slots uses rbx rsi rdi r12 r13 r14
+; RCX=identity*, EDX=parent cluster, R8D=needed slots (>0),
+; R9=12-byte {uint64 start; uint32 consumed_end;}* out -> EAX=status.
+; Active transaction required; may append zeroed clusters. Output may be partial
+; on failure. The caller must write the name set/end marker and finish/rollback.
+proc f_slots uses rbx rsi r12 r13
 	locals
 		cursor FatCursor
 		allocated dd ?
@@ -145,7 +155,7 @@ body:
 	mov r13, r9
 	xor esi, esi
 	mov dword [past_end], 0
-	fastcall fat_dir_open, rbx, edx, addr cursor
+	fastcall fat_dir_open, rcx, edx, addr cursor
 	test eax, eax
 	jnz .done
 .scan:
@@ -154,8 +164,8 @@ body:
 	je .extend
 	test eax, eax
 	jnz .done
-	mov edi, dword [cursor.offset]
-	movzx eax, byte [rbx + FatIdentity.directory+rdi]
+	mov eax, dword [cursor.offset]
+	movzx eax, byte [rbx + FatIdentity.directory+rax]
 	cmp dword [past_end], 0
 	jne .free
 	test eax, eax
@@ -203,7 +213,12 @@ endp
 
 ; Create file or empty directory with a UTF-16 long name. Every new name has
 ; a collision-checked short alias. Default timestamps are zero (unspecified).
-proc f_create uses rbx rsi rdi r12 r13 r14 r15, a, b, c, d, ignore
+; RCX=identity*, EDX=parent, R8=const FatCreate*, R9=FatEntry* out;
+; fifth stack argument [ignore]=old SFN index+1 for rename, 0 for normal create.
+; EAX=status. Requires active transaction; does not begin/end it. Output changes
+; only on F_OK, but generation is provisional until wrapper accepts the operation.
+; First four formal names exist to place the fifth argument at its Win64 offset.
+proc f_create uses rbx rsi rdi r12 r13 r14 r15, id_arg, parent_arg, request_arg, out_arg, ignore
 	locals
 		entry FatEntry
 		first dq ?
@@ -212,7 +227,6 @@ proc f_create uses rbx rsi rdi r12 r13 r14 r15, a, b, c, d, ignore
 		offset dd ?
 		allocated dd ?
 		checksum dd ?
-		fragment dd ?
 		chain dq ?
 	endl
 body:
@@ -220,8 +234,9 @@ body:
 	mov r12d, edx
 	mov r13, r8
 	mov r14, r9
+	mov eax, F_ARGUMENT
 	cmp dword [r13 + FatCreate.directory], 1
-	ja .argument
+	ja .done
 	fastcall f_name_check, [r13 + FatCreate.name]
 	test eax, eax
 	jnz .done
@@ -274,10 +289,6 @@ body:
 	shr eax, 16
 	mov word [entry.raw+20], ax
 	; f_allocate left scratch zero-filled. Construct dot and dot-dot.
-	lea rdi, [rbx + FatIdentity.scratch]
-	mov ecx, dword [rbx + FatIdentity.sector_bytes]
-	xor eax, eax
-	rep stosb
 	mov rax, 202020202020202Eh
 	mov qword [rbx + FatIdentity.scratch], rax
 	mov qword [rbx + FatIdentity.scratch+32], rax
@@ -301,7 +312,7 @@ body:
 	shr eax, 16
 	mov word [rbx + FatIdentity.scratch+52], ax
 	fastcall f_cluster_sector, rbx, [allocated]
-	fastcall f_write_sector, rbx, rax, addr rbx + FatIdentity.scratch
+	fastcall f_write_sector, rcx, rax, addr rcx + FatIdentity.scratch
 	test eax, eax
 	jnz .finish
 .slots:
@@ -411,13 +422,13 @@ body:
 	ret
 .exists:
 	mov eax, F_EXISTS
-	ret
-.argument:
-	mov eax, F_ARGUMENT
-	ret
+	jmp .done
 endp
 
 ; The public wrapper owns operation acceptance and the caller's output.
+; RCX=identity*, EDX=parent cluster, R8=const FatCreate*, R9=FatEntry* out.
+; EAX=status. Begin/end an isolated operation, then publish a fresh entry only
+; on F_OK. Name/request/output must not overlap; see fat32.h.
 proc fat_create uses rbx rsi rdi r12 r13 r14
 	locals
 		entry FatEntry
@@ -427,7 +438,7 @@ body:
 	mov r12d, edx
 	mov r13, r8
 	mov r14, r9
-	fastcall f_begin, rbx
+	fastcall f_begin, rcx
 	test eax, eax
 	jnz .done
 	fastcall f_create, rbx, r12d, r13, addr entry, 0
@@ -446,7 +457,11 @@ body:
 endp
 
 ; Delete only the name records, preserving the data chain (shared by rename).
-proc f_erase uses rbx rsi rdi r12 r13
+; RCX=identity*, RDX=const existing FatEntry* -> EAX=status.
+; Active transaction required. Re-enumerate parent to identify only valid LFN
+; records attached to the SFN, then mark that set deleted. Preserve the chain.
+; Initial setup consumes RCX/RDX directly; saved RBX/R12 are for later calls.
+proc f_erase uses rbx rsi r12 r13
 	locals
 		cursor FatCursor
 		entry FatEntry
@@ -456,7 +471,7 @@ proc f_erase uses rbx rsi rdi r12 r13
 body:
 	mov rbx, rcx
 	mov r12, rdx
-	fastcall fat_dir_open, rbx, [r12 + FatEntry.parent], addr cursor
+	fastcall fat_dir_open, rcx, [rdx + FatEntry.parent], addr cursor
 	test eax, eax
 	jnz .done
 .find:
@@ -476,8 +491,8 @@ body:
 	fastcall f_directory, rbx, [location]
 	test eax, eax
 	jnz .done
-	mov edi, dword [offset]
-	mov byte [rbx + FatIdentity.directory+rdi], 0E5h
+	mov eax, dword [offset]
+	mov byte [rbx + FatIdentity.directory+rax], 0E5h
 	fastcall f_write_sector, rbx, [location], addr rbx + FatIdentity.directory
 	test eax, eax
 	jnz .done
@@ -490,6 +505,9 @@ endp
 
 ; Rename within the same directory, including case-only changes. Allocate a
 ; new checked name set, preserve metadata and chain, then erase the old name.
+; RCX=identity*, RDX=FatEntry* in-out, R8=const UTF-16 new component.
+; EAX=status. Same-parent operation; preserve chain/non-name metadata. Reject
+; readonly/dot records. Publish new snapshot only after the transaction accepts.
 proc fat_rename uses rbx rsi rdi r12 r13
 	locals
 		entry FatEntry
@@ -499,13 +517,15 @@ body:
 	mov rbx, rcx
 	mov r12, rdx
 	mov r13, r8
-	fastcall f_validate, rbx, r12
+	fastcall f_validate, rcx, rdx
 	test eax, eax
 	jnz .done
+	mov eax, F_ARGUMENT
 	cmp byte [r12 + FatEntry.raw], '.'
-	je .argument
+	je .done
+	mov eax, F_READONLY
 	test byte [r12 + FatEntry.raw+11], 1
-	jnz .ro
+	jnz .done
 	mov qword [request.name], r13
 	mov dword [request.directory], 0
 	mov dword [request.reserved], 0
@@ -544,30 +564,27 @@ body:
 	xor eax, eax
 .done:
 	ret
-.argument:
-	mov eax, F_ARGUMENT
-	ret
-.ro:
-	mov eax, F_READONLY
-	ret
 endp
 
-proc fat_remove uses rbx rsi rdi r12 r13
+; RCX=identity*, RDX=const FatEntry* -> EAX=status.
+; Require ordinary file/empty directory and nonshared chain. Reject readonly,
+; dot/root/self links; ignore only exact dot records while checking emptiness.
+; Success invalidates the input snapshot but does not overwrite its memory.
+proc fat_remove uses rbx rsi r12
 	locals
 		cursor FatCursor
 		child FatEntry
 		chain dq ?
-		location dq ?
-		offset dd ?
 	endl
 body:
 	mov rbx, rcx
 	mov r12, rdx
-	fastcall f_validate, rbx, r12
+	fastcall f_validate, rcx, rdx
 	test eax, eax
 	jnz .done
+	mov eax, F_READONLY
 	test byte [r12 + FatEntry.raw+11], 1
-	jnz .ro
+	jnz .done
 	cmp byte [r12 + FatEntry.raw], '.'
 	je .bad
 	mov eax, dword [r12 + FatEntry.cluster]
@@ -621,11 +638,8 @@ body:
 	ret
 .notempty:
 	mov eax, F_NOTEMPTY
-	ret
-.ro:
-	mov eax, F_READONLY
-	ret
+	jmp .done
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 endp

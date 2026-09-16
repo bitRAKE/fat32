@@ -17,7 +17,7 @@ extrn fat_mount
 extrn fat_dir_open
 extrn fat_dir_next
 
-proc mainCRTStartup uses rbx rsi rdi
+proc mainCRTStartup uses rdi
 	GetStdHandle -11
 	mov qword [output], rax
 	fastcall win_open, &volume, &device, 0
@@ -41,8 +41,8 @@ proc mainCRTStartup uses rbx rsi rdi
 	WideCharToMultiByte 65001, 0, &entry.name, dword [entry.name_length], &text, 2046, 0, 0
 	test eax, eax
 	jz .failed
-	lea rsi, [text]
-	mov word [rsi+rax], 0A0Dh
+	lea rcx, [text]
+	mov word [rcx+rax], 0A0Dh
 	add eax, 2
 	WriteFile qword [output], &text, eax, &written, 0
 	test eax, eax

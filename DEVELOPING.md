@@ -23,6 +23,7 @@ buffer.asm / buffer.h    format-neutral staged sector versions
 win32.asm                handle, sector geometry, lock, seek/read/write/flush
 example.asm              small CRT-free client
 tests/test.c             independent sparse-media fixtures and fault injection
+tests/abi.asm            nonvolatile probes and volatile-clobbering callbacks
 tests/usb.c              raw/native interoperability harness
 tests/repo.c             committed pair-write/delete workload and FAT chain readback
 tests/run-repo.ps1       immutable Git corpus export and independent blob comparisons
@@ -38,6 +39,37 @@ the core disassembly. Structure layouts are asserted in assembly and C.
 `locals` containing a structure can change fasmg's dot-label scope. Procedures
 place a `body:` anchor after `endl` to keep control-flow labels separate from
 fields such as `request.done`. All nonvolatile pushes occur in PROC prologues.
+
+### Parameters, register lifetimes, and exits
+
+`fat32.h` and `buffer.h` specify each public interface: register/width, required
+storage, ownership, aliasing, success/failure output, and transaction lifetime.
+The export lists summarize the arguments; private helpers document their own
+contracts at the definition. Keep these three views consistent when editing.
+
+The installed `fastcall` assigns arguments left to right and elides identical
+source/destination registers. Use incoming RCX/RDX directly at the first call
+when still live, even when saving them for later calls. Check every later
+argument against registers overwritten by earlier arguments. Stack argument
+setup may use RAX. The generated Win32 API macros have their own setup order;
+inspect their emitted instructions separately when reusing incoming registers.
+
+Keep a value in a nonvolatile register only when it spans a call or an instruction
+requires that register. Remove unused USES entries and locals after changes.
+An explicitly documented private exception, `f_cluster_sector` preserving RCX,
+allows the immediately following call to reuse that identity argument. Providers
+receive no such assumption: the tests overwrite volatile GPRs after callbacks.
+
+RET expands to the full stack/register restoration. Every framed library routine
+shares one epilogue. Cold error blocks jump to it; a status-only guard can preload
+EAX before adjacent CMP/TEST and conditional branch. Do not insert status loads
+between the comparison and branch. Bare leaf returns may remain separate.
+
+Inspect actual `.text` size, disassembly, and unwind data after code changes.
+`tests/abi.asm` seeds all eight nonvolatile GPRs, checks them after public calls,
+checks provider-call stack alignment, and poisons volatile callback registers.
+These checks accompany the functional/fault-injection tests; they are not a
+throughput benchmark.
 
 ## Invariants
 

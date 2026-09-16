@@ -16,7 +16,21 @@ typedef struct Image {
     int fail_read, fail_write, fail_flush;
     uint64_t reads, writes;
 } Image;
-typedef struct Fixture { Image disk; SectorBuffer buffer; FatIdentity id; SectorOps fault; int fail_stage; } Fixture;
+typedef struct Fixture { Image disk; SectorBuffer buffer; FatIdentity id; SectorOps fault, inner; int fail_stage; } Fixture;
+/* ABI shims poison volatile GPRs after every filesystem-provider callback. */
+extern int abi_read(void *,uint64_t,void *);
+extern int abi_write(void *,uint64_t,const void *);
+extern int abi_begin(void *);
+extern void abi_end(void *,int);
+typedef struct AbiCall { uintptr_t target,args[4]; int result; } AbiCall;
+extern unsigned abi_probe(AbiCall *);
+_Static_assert(offsetof(AbiCall,result)==40,"ABI probe result");
+static int checked_call(uintptr_t target,uintptr_t a,uintptr_t b,uintptr_t c,uintptr_t d) {
+    AbiCall call={target,{a,b,c,d},-1}; unsigned mask=abi_probe(&call);
+    if(mask) { fprintf(stderr,"ABI nonvolatile corruption: mask=%02X\n",mask); ExitProcess(1); }
+    return call.result;
+}
+#define ABI(fn,a,b,c,d) checked_call((uintptr_t)(fn),(uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),(uintptr_t)(d))
 static unsigned tests;
 static uint16_t rd16(const void *v) { const unsigned char *p=v; return (uint16_t)(p[0] | p[1]<<8); }
 static uint32_t rd32(const void *v) { const unsigned char *p=v; return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24; }
@@ -79,6 +93,8 @@ static Fixture *fixture(unsigned bytes,unsigned spc) {
     Fixture *f=calloc(1,sizeof(*f)); CHECK(f); init_image(&f->disk,bytes,spc);
     OK(sb_init(&f->buffer,&f->disk.ops)); f->fault=f->buffer.ops; f->fault.context=f;
     f->fault.read=fault_read; f->fault.write=fault_write; f->fault.begin=fault_begin; f->fault.end=fault_end;
+    f->inner=f->fault; f->fault.context=&f->inner;
+    f->fault.read=abi_read; f->fault.write=abi_write; f->fault.begin=abi_begin; f->fault.end=abi_end;
     f->fail_stage=-1; OK(fat_mount(&f->id,&f->fault,NULL)); return f;
 }
 static void destroy(Fixture *f) {
@@ -257,11 +273,14 @@ static void test_win32_io(void) {
     v.ops.sector_bytes=512; v.ops.sectors=(uint64_t)size.QuadPart/512;
     for(i=0;i<sizeof(input);i++) input[i]=(unsigned char)(i*7+13);
     OK(sb_init(&b,&v.ops)); OK(sb_begin(&b)); OK(sb_write(&b,0x800003,input)); sb_end(&b,1); OK(sb_commit(&b));
-    memset(out,0,sizeof(out)); OK(win_read(&v,0x800003,out)); CHECK(!memcmp(out,input,512));
+    OK(ABI(win_write,&v,0x800003,input,0)); OK(ABI(win_flush,&v,0,0,0));
+    memset(out,0,sizeof(out)); OK(ABI(win_read,&v,0x800003,out,0)); CHECK(!memcmp(out,input,512));
     size.QuadPart=0x100000000LL+3*512; CHECK(SetFilePointerEx(h,size,NULL,FILE_BEGIN));
     CHECK(ReadFile(h,aligned,512,&got,NULL)); CHECK(got==512 && !memcmp(aligned,input,512));
-    CHECK(win_read(&v,v.ops.sectors,out)==F_RANGE); v.locked=0; CHECK(win_write(&v,0,input)==F_READONLY);
-    OK(win_close(&v)); CHECK(DeleteFileW(path));
+    CHECK(ABI(win_read,&v,v.ops.sectors,out,0)==F_RANGE); v.locked=0; CHECK(ABI(win_write,&v,0,input,0)==F_READONLY);
+    OK(ABI(win_close,&v,0,0,0)); CHECK(DeleteFileW(path));
+    CHECK(ABI(win_open,&v,path,0,0)==F_IO); CHECK(v.error==ERROR_FILE_NOT_FOUND);
+    OK(ABI(win_close,&v,0,0,0));
 }
 static void test_rename(void) {
     Fixture *f=fixture(512,1); FatEntry e,other; unsigned char input[1200],out[1200]; FatTransfer t;
@@ -330,10 +349,50 @@ static void test_media_errors(void) {
     f->disk.fail_flush=1; CHECK(sb_commit(&f->buffer)==F_IO); CHECK(f->buffer.poisoned && f->buffer.pages);
     CHECK(sb_read(&f->buffer,0,data)==F_IO); destroy(f);
 }
+static void test_abi(void) {
+    Fixture *f=fixture(512,1); FatEntry e,found; FatCursor cursor; FatCreate request={U("ABI.bin"),0,0};
+    FatTransfer transfer; FatStamp stamp={0,0,0,0,0,0,0x20}; SectorBuffer extra={0}; uint32_t chain[2],value;
+    unsigned char data[517],out[517];
+    report("Win64 nonvolatile preservation / volatile callback clobbers / common error exits");
+    OK(ABI(fat_mount,&f->id,&f->fault,NULL,0));
+    OK(ABI(fat_create,&f->id,2,&request,&e));
+    memset(data,0xA9,sizeof(data)); transfer=(FatTransfer){data,0,sizeof(data),0};
+    OK(ABI(fat_write,&f->id,&e,&transfer,0)); CHECK(transfer.done==sizeof(data));
+    transfer=(FatTransfer){out,0,sizeof(out),0}; OK(ABI(fat_read,&f->id,&e,&transfer,0)); CHECK(!memcmp(data,out,sizeof(data)));
+    OK(ABI(fat_resize,&f->id,&e,1031,0));
+    OK(ABI(fat_set_info,&f->id,&e,&stamp,0));
+    OK(ABI(fat_rename,&f->id,&e,U("ABI renamed Ω.bin"),0));
+    OK(ABI(fat_lookup,&f->id,2,U("ABI renamed Ω.bin"),&found));
+    OK(ABI(fat_dir_open,&f->id,2,&cursor,0)); OK(ABI(fat_dir_next,&f->id,&cursor,&found,0));
+    CHECK(ABI(fat_dir_next,&f->id,&cursor,&found,0)==F_END);
+    OK(ABI(fat_get,&f->id,e.cluster,&value,0));
+    OK(ABI(fat_chain,&f->id,e.cluster,chain,0)); CHECK(chain[0]==3);
+    CHECK(ABI(fat_resize,&f->id,&e,0x100000000ull,0)==F_RANGE);
+    stamp.create_tenth=200; CHECK(ABI(fat_set_info,&f->id,&e,&stamp,0)==F_ARGUMENT); stamp.create_tenth=0;
+    stamp.attributes=0x21; OK(ABI(fat_set_info,&f->id,&e,&stamp,0));
+    CHECK(ABI(fat_write,&f->id,&e,&transfer,0)==F_READONLY);
+    CHECK(ABI(fat_resize,&f->id,&e,10,0)==F_READONLY);
+    CHECK(ABI(fat_rename,&f->id,&e,U("blocked"),0)==F_READONLY);
+    CHECK(ABI(fat_remove,&f->id,&e,0,0)==F_READONLY);
+    stamp.attributes=0x20; OK(ABI(fat_set_info,&f->id,&e,&stamp,0));
+    OK(ABI(fat_remove,&f->id,&e,0,0));
+    CHECK(ABI(fat_lookup,&f->id,2,U("ABI renamed Ω.bin"),&found)==F_NOTFOUND);
+    CHECK(ABI(fat_read,&f->id,&e,&transfer,0)==F_STALE);
+    OK(ABI(fat_invalidate,&f->id,0,0,0));
+    OK(ABI(sb_init,&extra,&f->disk.ops,0,0));
+    CHECK(ABI(sb_write,&extra,10,data,0)==F_BUSY);
+    OK(ABI(sb_begin,&extra,0,0,0)); CHECK(ABI(sb_begin,&extra,0,0,0)==F_BUSY);
+    CHECK(ABI(sb_commit,&extra,0,0,0)==F_BUSY);
+    OK(ABI(sb_write,&extra,10,data,0)); (void)ABI(sb_end,&extra,1,0,0);
+    OK(ABI(sb_read,&extra,10,out,0)); CHECK(!memcmp(data,out,512));
+    CHECK(ABI(sb_read,&extra,extra.ops.sectors,out,0)==F_RANGE);
+    OK(ABI(sb_commit,&extra,0,0,0)); OK(ABI(sb_discard,&extra,0,0,0));
+    destroy(f);
+}
 int main(void) {
     printf("FAT32 verification (assembly library, synthetic sparse sector backends)\n");
     test_geometry(); test_buffer(); test_basic(512,1); test_basic(512,64); test_basic(512,128); test_basic(4096,16);
     test_directories(); test_rollback(); test_fragmented(); test_active_fat(); test_no_space(); test_invalid_names();
-    test_corruption(); test_win32_io(); test_rename(); test_lfn_damage(); test_mutation_rollback(); test_media_errors();
+    test_corruption(); test_win32_io(); test_rename(); test_lfn_damage(); test_mutation_rollback(); test_media_errors(); test_abi();
     printf("PASS: %u suites\n",tests); return 0;
 }

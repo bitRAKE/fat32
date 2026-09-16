@@ -1,8 +1,11 @@
 # Library API
 
-The authoritative assembly declarations are `fat32.h` and `buffer.h`.
+The authoritative assembly contracts are [fat32.h](fat32.h) and
+[buffer.h](buffer.h). Each lists register arguments, widths, pointer direction,
+storage lifetime, preconditions, and output validity on success and failure.
+The `public` declarations and procedure bodies also identify their arguments.
 `tests/api.h` is a C ABI mirror with layout assertions. All functions and callbacks
-use the Windows x64 calling convention. Except the void `end` callback, EAX is a
+use the Windows x64 calling convention. Except `sb_end` and the void `end` callback, EAX is a
 status: zero is success. `fat_dir_next` returns `F_END` (1) at directory end.
 
 All state and output buffers are caller-owned. Zero identities and adapters
@@ -11,7 +14,13 @@ mapping alive as long as the identity. Serialize access to a buffer and its
 identity; separate instances can run independently. Do not modify live identity,
 cursor, or entry bookkeeping. All pointer arguments must address their declared
 storage; transfer data must address `length` bytes and must not alias library
-state. Component strings must be NUL-terminated UTF-16.
+state. Component strings must be NUL-terminated UTF-16. A zero-length transfer
+may use a null data pointer. Other null allowances are stated explicitly.
+
+Callbacks may overwrite all Win64 volatile registers. Assembly callers must
+provide the 32-byte home area and align RSP to 16 bytes before CALL; nonvolatile
+registers are preserved. Private `f_*` helpers document any additional register
+guarantees beside their definitions. Those guarantees do not extend to providers.
 
 ## Sector boundary
 

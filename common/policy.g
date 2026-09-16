@@ -47,4 +47,17 @@ epilogue@proc equ static_rsp_epilogue
 close@proc equ fat32_debug_close
 newcoff_debug_procs
 section '.text' code readable executable align 16
+
+; Source call-site policy (the installed fastcall macro is not a parallel move):
+; Arguments are assigned LEFT TO RIGHT: RCX, RDX, R8, R9, then stack arguments.
+; Identical source/destination registers emit no MOV. Save a live input for later
+; calls when needed, but use its incoming register at the first call while valid.
+; Never refer to an old argument register after an earlier argument overwrites
+; it; use the saved copy in that case. Stack arguments can also use RAX scratch.
+; Treat volatile registers as dead across calls, except an explicitly documented
+; private helper guarantee (f_cluster_sector preserves RCX).
+;
+; RET expands to the full static-RSP restore sequence. Framed routines share one
+; exit; status-only guards load EAX before adjacent CMP/TEST + conditional jump.
+; Leaves with a bare one-byte RET may retain separate value-return paths.
 end if

@@ -2,7 +2,10 @@
 ; a failed operation changes neither caller metadata nor the sector overlay.
 
 ; Verify snapshot, slot membership, and raw bytes before touching a file.
-proc f_validate uses rbx rsi rdi
+; RCX=identity*, RDX=const FatEntry* -> EAX=status; no entry modification.
+; Check generation, parent/slot bounds, raw SFN and cluster/size agreement.
+; R10 is a cache pointer used only after the final call, so needs no save.
+proc f_validate uses rbx rsi
 	locals
 		location dq ?
 		offset dd ?
@@ -34,27 +37,27 @@ body:
 	fastcall f_directory, rbx, [location]
 	test eax, eax
 	jnz .done
-	mov edi, dword [offset]
-	add rdi, rbx
-	add rdi, FatIdentity.directory
+	mov r10d, dword [offset]
+	add r10, rbx
+	add r10, FatIdentity.directory
 	iterate n, 0,8,16,24
-		mov rax, qword [rdi+n]
+		mov rax, qword [r10+n]
 		cmp rax, qword [rsi + FatEntry.raw+n]
 		jne .stale
 	end iterate
-	cmp byte [rdi], 0
+	cmp byte [r10], 0
 	je .bad
-	cmp byte [rdi], 0E5h
+	cmp byte [r10], 0E5h
 	je .bad
-	test byte [rdi+11], 8
+	test byte [r10+11], 8
 	jnz .bad
-	movzx eax, word [rdi+20]
+	movzx eax, word [r10+20]
 	shl eax, 16
-	mov ax, word [rdi+26]
+	mov ax, word [r10+26]
 	and eax, F_MASK
 	cmp eax, [rsi + FatEntry.cluster]
 	jne .bad
-	mov eax, dword [rdi+28]
+	mov eax, dword [r10+28]
 	cmp eax, [rsi + FatEntry.size]
 	jne .bad
 	xor eax, eax
@@ -62,13 +65,16 @@ body:
 	ret
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 .stale:
 	mov eax, F_STALE
-	ret
+	jmp .done
 endp
 
 ; Check ordinary file and full chain length, not merely the requested prefix.
+; RCX=identity*, RDX=const FatEntry* -> EAX=status.
+; Validate snapshot, ordinary-file attributes and full chain with at least
+; ceil(size/cluster_bytes) clusters. Extra allocated clusters are permitted.
 proc f_file uses rbx rsi
 	locals
 		chain dq ?
@@ -76,7 +82,7 @@ proc f_file uses rbx rsi
 body:
 	mov rbx, rcx
 	mov rsi, rdx
-	fastcall f_validate, rbx, rsi
+	fastcall f_validate, rcx, rdx
 	test eax, eax
 	jnz .done
 	test byte [rsi + FatEntry.raw+11], 18h
@@ -96,10 +102,13 @@ body:
 	ret
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 endp
 
 ; Walk a prevalidated chain to index. Output cluster at R9.
+; RCX=identity*, EDX=first cluster, R8D=zero-based index, R9=uint32_t* out.
+; EAX=status. Caller prevalidates chain and index < count. Output unchanged on
+; error; no allocation/transaction. Index 0 returns the supplied first cluster.
 proc f_nth uses rbx rsi rdi r12
 	locals
 		next dd ?
@@ -131,12 +140,17 @@ body:
 	ret
 .bad:
 	mov eax, F_CORRUPT
-	ret
+	jmp .done
 endp
 
 ; Transfer a bounded byte range in a prevalidated, sufficiently long chain.
 ; mode 0 reads, 1 writes, 2 zeroes. Always uses a complete sector buffer.
-proc f_bytes uses rbx rsi rdi r12 r13 r14 r15
+; RCX=identity*, EDX=first cluster, R8=FatTransfer* in-out, R9D=mode.
+; Modes: 0 read, 1 write, 2 zero (data unused). EAX=status; done is reset then
+; counts successfully transferred sectors/spans, including a prefix on error.
+; Caller validates the full range/chain; modes 1/2 require an active transaction.
+; Destroys scratch; performs partial-sector read/modify/write when editing.
+proc f_bytes uses rbx rsi rdi r12 r13 r14
 	locals
 		cluster dd ?
 		inside dd ?
@@ -169,7 +183,7 @@ body:
 	fastcall f_cluster_sector, rbx, [cluster]
 	add rax, r14
 	mov qword [lba], rax
-	fastcall f_read_sector, rbx, rax, addr rbx + FatIdentity.scratch
+	fastcall f_read_sector, rcx, rax, addr rcx + FatIdentity.scratch
 	test eax, eax
 	jnz .done
 	mov eax, dword [r12 + FatTransfer.length]
@@ -220,6 +234,9 @@ body:
 	ret
 endp
 
+; RCX=identity*, RDX=const FatEntry* file, R8=FatTransfer* in-out.
+; EAX=status; done reset/clamped to EOF, partial prefix reported on read failure.
+; Neither entry nor offset/length changes. See fat32.h for buffer/alias rules.
 proc fat_read uses rbx rsi rdi
 	locals
 		request FatTransfer
@@ -229,7 +246,7 @@ body:
 	mov rsi, rdx
 	mov rdi, r8
 	mov dword [rdi + FatTransfer.done], 0
-	fastcall f_file, rbx, rsi
+	fastcall f_file, rcx, rdx
 	test eax, eax
 	jnz .done
 	mov eax, dword [rsi + FatEntry.size]
@@ -250,21 +267,24 @@ body:
 	ret
 .ok:
 	xor eax, eax
-	ret
+	jmp .done
 endp
 
 ; Write the raw SFN to its slot without disturbing neighboring entries/LFNs.
-proc f_store uses rbx rsi rdi
+; RCX=identity*, RDX=const validated FatEntry* -> EAX=status.
+; Active transaction required. Replace only its 32-byte SFN in the cached sector
+; and stage it. Does not refresh generation; input entry stays unchanged.
+proc f_store uses rbx rsi
 	mov rbx, rcx
 	mov rsi, rdx
-	fastcall f_directory, rbx, [rsi + FatEntry.sector]
+	fastcall f_directory, rcx, [rdx + FatEntry.sector]
 	test eax, eax
 	jnz .done
-	mov edi, dword [rsi + FatEntry.offset]
-	lea rdi, [rbx + FatIdentity.directory+rdi]
+	mov r9d, dword [rsi + FatEntry.offset]
+	lea r9, [rbx + FatIdentity.directory+r9]
 	iterate n, 0,8,16,24
 		mov rax, qword [rsi + FatEntry.raw+n]
-		mov qword [rdi+n], rax
+		mov qword [r9+n], rax
 	end iterate
 	fastcall f_write_sector, rbx, [rsi + FatEntry.sector], addr rbx + FatIdentity.directory
 .done:
@@ -272,6 +292,10 @@ proc f_store uses rbx rsi rdi
 endp
 
 ; Resize within an existing transaction. Entry is a private work copy.
+; RCX=identity*, RDX=private FatEntry* in-out, R8D=new uint32 byte size.
+; EAX=status. Caller owns active transaction and validated file. Update chain,
+; zero exposed bytes and stage SFN; failure may alter work copy/staged sectors.
+; Caller must roll back and never publish the work copy on failure.
 proc f_resize uses rbx rsi rdi r12 r13 r14
 	locals
 		chain dq ?
@@ -283,7 +307,7 @@ body:
 	mov rbx, rcx
 	mov rsi, rdx
 	mov r12d, r8d
-	fastcall fat_chain, rbx, [rsi + FatEntry.cluster], addr chain
+	fastcall fat_chain, rcx, [rdx + FatEntry.cluster], addr chain
 	test eax, eax
 	jnz .done
 	mov eax, r12d
@@ -362,6 +386,9 @@ body:
 	ret
 endp
 
+; RCX=identity*, RDX=FatEntry* file in-out, R8=uint64 new byte size.
+; EAX=status. Reject >0xFFFFFFFF/readonly; transaction updates a private copy.
+; Publish refreshed entry only after acceptance. Equal size still transacts.
 proc fat_resize uses rbx rsi rdi r12 r13
 	locals
 		entry FatEntry
@@ -370,13 +397,15 @@ body:
 	mov rbx, rcx
 	mov r12, rdx
 	mov r13, r8
+	mov eax, F_RANGE
 	shr r8, 32
-	jnz .range
-	fastcall f_file, rbx, r12
+	jnz .done
+	fastcall f_file, rcx, rdx
 	test eax, eax
 	jnz .done
+	mov eax, F_READONLY
 	test byte [r12 + FatEntry.raw+11], 1
-	jnz .ro
+	jnz .done
 	mov rsi, r12
 	lea rdi, [entry]
 	mov ecx, sizeof.FatEntry
@@ -397,14 +426,11 @@ body:
 	xor eax, eax
 .done:
 	ret
-.range:
-	mov eax, F_RANGE
-	ret
-.ro:
-	mov eax, F_READONLY
-	ret
 endp
 
+; RCX=identity*, RDX=FatEntry* file in-out, R8=FatTransfer* in-out.
+; EAX=status. Nonzero writes are atomic in staging; publish entry/done only after
+; acceptance. Failure leaves entry unchanged, done=0; zero length validates only.
 proc fat_write uses rbx rsi rdi r12 r13 r14
 	locals
 		entry FatEntry
@@ -422,11 +448,12 @@ body:
 	mov rax, r14
 	shr rax, 32
 	jnz .range
-	fastcall f_file, rbx, r12
+	fastcall f_file, rcx, rdx
 	test eax, eax
 	jnz .done
+	mov eax, F_READONLY
 	test byte [r12 + FatEntry.raw+11], 1
-	jnz .ro
+	jnz .done
 	cmp dword [r13 + FatTransfer.length], 0
 	je .ok
 	mov rsi, r12
@@ -469,14 +496,14 @@ body:
 	ret
 .range:
 	mov eax, F_RANGE
-	ret
-.ro:
-	mov eax, F_READONLY
-	ret
+	jmp .done
 endp
 
 ; Caller supplies packed timestamps. Structural attributes cannot be changed
 ; by set_info; name, first cluster, and size have dedicated operations.
+; RCX=identity*, RDX=FatEntry* in-out, R8=const FatStamp* -> EAX=status.
+; Allow readonly changes, forbid structural attributes, bound create_tenth.
+; Other timestamp bitfields are caller-validated. Publish only after acceptance.
 proc fat_set_info uses rbx rsi rdi r12 r13
 	locals
 		entry FatEntry
@@ -485,15 +512,16 @@ body:
 	mov rbx, rcx
 	mov r12, rdx
 	mov r13, r8
-	fastcall f_validate, rbx, r12
+	fastcall f_validate, rcx, rdx
 	test eax, eax
 	jnz .done
-	mov al, byte [r13 + FatStamp.attributes]
-	xor al, [r12 + FatEntry.raw+11]
-	test al, 0D8h
-	jnz .argument
+	mov dl, byte [r13 + FatStamp.attributes]
+	xor dl, [r12 + FatEntry.raw+11]
+	mov eax, F_ARGUMENT
+	test dl, 0D8h
+	jnz .done
 	cmp byte [r13 + FatStamp.create_tenth], 199
-	ja .argument
+	ja .done
 	mov rsi, r12
 	lea rdi, [entry]
 	mov ecx, sizeof.FatEntry
@@ -527,8 +555,5 @@ body:
 	rep movsb
 	xor eax, eax
 .done:
-	ret
-.argument:
-	mov eax, F_ARGUMENT
 	ret
 endp

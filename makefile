@@ -24,8 +24,9 @@ fatdemo.exe: example.obj fat32.lib sector.lib
 
 test: tests.exe
 	.\tests.exe
-tests.exe: tests\test.c tests\api.h fat32.lib sector.lib
-	cl /nologo /std:c17 /utf-8 /W4 /WX /Zi /Od /Fe:$@ tests\test.c fat32.lib sector.lib kernel32.lib /link /incremental:no
+tests\abi.obj: tests\abi.asm fat32.h common\policy.g
+tests.exe: tests\test.c tests\api.h tests\abi.obj fat32.lib sector.lib
+	cl /nologo /std:c17 /utf-8 /W4 /WX /Zi /Od /Fe:$@ tests\test.c tests\abi.obj fat32.lib sector.lib kernel32.lib /link /incremental:no
 
 usbcheck.exe: tests\usb.c tests\api.h fat32.lib sector.lib
 	cl /nologo /std:c17 /utf-8 /W4 /WX /Zi /Od /Fe:$@ tests\usb.c fat32.lib sector.lib kernel32.lib /link /incremental:no

@@ -38,6 +38,8 @@ client: file names, metadata, byte ranges
   chain validation, and advisory FSInfo invalidation.
 - Atomic **in-memory** operations: a failed mutation restores its staged sectors.
   Explicit buffer commit is the only route to physical writes.
+- Documented register, buffer, lifetime, and failure contracts at the public
+  interfaces, with ABI regression probes and shared assembly exit sequences.
 
 ## Build and run
 
