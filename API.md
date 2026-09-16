@@ -89,6 +89,8 @@ Read errors can leave a successfully read prefix in the destination and report
 its length in `done`. A failed write leaves `done=0`, caller entry unchanged, and
 the operation's staged sectors rolled back. A successful write/resize/rename/
 set-info refreshes the supplied entry. File sizes are limited to `0xFFFFFFFF`.
+Zero-length writes validate the request but do not start a transaction or change
+the file. Equal-size resize requests still transact.
 
 `FatCreate = {UTF16_name_pointer, uint32_directory, uint32_reserved}`. Directory
 is 0 or 1; reserved is zero. All new names get LFN records and a collision-checked
@@ -106,6 +108,8 @@ Every completed transaction, including rollback, invalidates **all other** entry
 snapshots and cursors. Refresh them by lookup/open. `F_STALE` prevents an old
 snapshot from targeting a reused slot. Bytewise SFN revalidation additionally
 checks the entry against the sector buffer before mutation.
+After mutation failure, also reacquire the supplied entry: its unchanged bytes
+can contain a generation that the rollback has invalidated.
 
 ## Supplied Win32 components
 
