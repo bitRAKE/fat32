@@ -76,9 +76,9 @@ FAT32 volume named TESTING. Writable opening acquires a volume lock; close
 dismounts after explicit commits, while the lock is still held.
 
 `usbcheck X: --flush-test` checks two explicit flushes on one locked handle without
-staging sector changes. TESTING (X:) was reformatted from 64 KiB to **32 KiB**
-clusters and now passes the complete write test twice, 18 automated suites, and
-read-only CHKDSK. Logs, hashes, and the failure that led to the flush-lifetime fix
+staging sector changes. The earlier **32 KiB** format passed the complete write
+test twice, 18 automated suites, and read-only CHKDSK. Logs, hashes, and the
+failure that led to the flush-lifetime fix
 are recorded in [VALIDATION.md](VALIDATION.md).
 
 ### Repository fragmentation test
@@ -119,6 +119,12 @@ identify committed file content. The test uses `git cat-file blob` and
 checkout conversion cannot hide changed bytes or produce false mismatches.
 Untracked build products and `.git` internals are outside the pinned tree.
 
+The 512-byte-cluster run at commit `bd5370b` passed: 45/45 files match their Git
+blob IDs through raw and native reads, after six passes, 86 writes, and 41
+deletions. Six final files have fragmented chains (up to 12 extents). The files
+remain under `X:\FAT32-repo-session`. See
+[the validation record](VALIDATION.md) for the pinned corpus and evidence.
+
 ## Contracts and scope
 
 Start with [API.md](API.md) for integration and [DEVELOPING.md](DEVELOPING.md)
@@ -141,4 +147,5 @@ short-name decoding is CP437, with a caller-provided OEM table available at moun
 
 The 64 KiB cluster case remains an intentional compatibility requirement from
 the original USB format. It exceeds the older specification's conservative
-32 KiB guidance; the current hardware test uses 32 KiB.
+32 KiB guidance. Physical read/write coverage now includes both 32 KiB and
+512-byte clusters.
