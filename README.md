@@ -33,8 +33,9 @@ UEFI Block I/O / kernel driver / Win32 adapter
 - Atomic in-memory mutation savepoints and explicit sector commits.
 - Documented register, ownership, lifetime, and error contracts.
 
-Start with [examples/uefi](examples/uefi/README.md) for OS integration,
+Start with [example/uefi](example/uefi/README.md) for OS integration,
 [API.md](API.md) for interfaces, and [DEVELOPING.md](DEVELOPING.md) for internals.
+The [example index](example/README.md) also covers the Win32 console client.
 
 ## Build
 
@@ -56,7 +57,7 @@ through `vswhere`. An x64 developer prompt can also run NMAKE directly.
 | --- | --- |
 | `fat32.lib` | Filesystem algorithms and caller-owned identity |
 | `sector.lib` | Optional Win32 transport and generic staging buffer |
-| `fatdemo.exe` | Minimal assembly client; set its sample device in `example.asm` |
+| `fatdemo.exe` | Minimal assembly client; set its sample device in `example/win32/demo.asm` |
 | `tests.exe` | Synthetic media, fault injection, ABI, and sector-file tests |
 | `ueficheck.exe` | UEFI adapter host mock |
 | `usbcheck.exe` | Raw/native interoperability and capture replay |

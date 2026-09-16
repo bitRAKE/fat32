@@ -70,16 +70,16 @@ loader mount; add a fresh kernel mount when your block driver is ready.
 Build the core from the repository root:
 
 ```cmd
-build.cmd examples
+build.cmd example\uefi\reader.obj fat32.lib
 build.cmd examples-test
 ```
 
-This builds `fat32.lib` and `examples\uefi\reader.obj`. Link the example object
+This builds `fat32.lib` and `example\uefi\reader.obj`. Link the example object
 and library with your own entry point and firmware setup. Both are AMD64 COFF.
 `examples-test` separately runs a host C mock of the firmware callback; it never
 accesses a physical device. Assembly declarations use `.inc`; `tests/api.h` is
 the separate C ABI mirror used by the host tests.
-The existing `fatdemo.exe`, `example.response`, `win32.asm`, and
+The [Win32 demo](../win32/README.md), `win32.asm`, and
 `buffer.asm` are Windows-host components. In particular, the supplied sector
 overlay uses `VirtualAlloc`/`VirtualFree`; it needs an allocator port or a
 replacement before use in an OS.

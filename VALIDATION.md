@@ -66,7 +66,7 @@ rejects the malformed pattern independently of cluster size.
 host firmware mock. Coverage includes the five-argument callback, 64-bit LBA and
 status, aligned bounce buffers, unaligned caller output, mount/read/EOF, bounds,
 and offline/media-change handling. The example has not been boot-tested under
-firmware; the [integration guide](examples/uefi/README.md) describes bring-up.
+firmware; the [integration guide](example/uefi/README.md) describes bring-up.
 
 ## Generated code
 

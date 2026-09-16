@@ -1,7 +1,7 @@
 # Implementation and verification
 
 For using this library in a UEFI-started OS, see
-[the OS development guide](examples/uefi/README.md). This document covers maintaining
+[the OS development guide](example/uefi/README.md). This document covers maintaining
 the library and its host-side verification tools.
 
 ## Style and build
@@ -25,7 +25,8 @@ fat32.asm                one filesystem library object
 fat32.inc                caller-owned identity and filesystem ABI
 buffer.asm / buffer.inc  format-neutral staged sector versions
 win32.asm                handle, sector geometry, lock, seek/read/write/flush
-example.asm              small CRT-free client
+example/win32/demo.asm   small CRT-free client
+example/uefi/            OS guide, assembly reader, and host firmware mock
 tests/test.c             independent sparse-media fixtures and fault injection
 tests/abi.asm            nonvolatile probes and volatile-clobbering callbacks
 tests/usb.c              raw/native interoperability harness
@@ -34,7 +35,6 @@ tests/run-repo.ps1       immutable Git corpus export and independent blob compar
 tests/run-64k.ps1        guarded 64 KiB native fixtures and physical mutation checks
 tests/inspect-64k.py     independent locked FAT/hash oracle and sparse sector capture
 tests/api.h              C ABI mirror
-examples/uefi/           OS guide, assembly reader, and host firmware mock
 ```
 
 For 64 KiB arithmetic, media consistency, and capture-replay
