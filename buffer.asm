@@ -5,7 +5,7 @@ FAT32_WIN32 := 1
 define win32.select.types system_memory
 define win32.select.downlevel kernel32
 include 'common/policy.g'
-include 'buffer.h'
+include 'buffer.inc'
 
 ; RCX=buffer* out, RDX=backend SectorOps*; EAX=status.
 public sb_init
@@ -199,7 +199,7 @@ endp
 ; This is not an on-disk journal and cannot make a power failure atomic.
 ; RCX=buffer* -> EAX=status. Idle, unpoisoned buffer with writable/flushable
 ; backend required. Latest sectors then flush; success frees pages. Any backend
-; failure poisons and retains them. Never retry a failed commit; see buffer.h.
+; failure poisons and retains them. Never retry a failed commit; see buffer.inc.
 proc sb_commit uses rbx rsi r12
 	mov rbx, rcx
 	mov eax, F_BUSY

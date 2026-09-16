@@ -129,8 +129,11 @@ remain under `X:\FAT32-repo-session`. See
 
 ## Contracts and scope
 
-Start with [API.md](API.md) for integration and [DEVELOPING.md](DEVELOPING.md)
-for cache, transaction, ABI, and durability rules.
+For an assembly OS starting through UEFI, begin with
+[examples/uefi](examples/uefi/README.md): sector-provider integration, assembly
+examples, transactional writes, and the loader/kernel handoff.
+Use [API.md](API.md) for the API index and [DEVELOPING.md](DEVELOPING.md)
+for implementation, cache, transaction, ABI, and durability rules.
 
 Physical commit is not a journal and is not atomic across a crash or power loss.
 An I/O failure during commit poisons the buffer. This library is not a volume

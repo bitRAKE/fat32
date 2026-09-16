@@ -1,6 +1,6 @@
 ; All filesystem knowledge is compiled into this one library object.
 include 'common/policy.g'
-include 'fat32.h'
+include 'fat32.inc'
 
 ; RCX=identity* out, RDX=SectorOps*, R8=OEM map or 0; EAX=status.
 public fat_mount

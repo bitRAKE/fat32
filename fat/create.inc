@@ -428,7 +428,7 @@ endp
 ; The public wrapper owns operation acceptance and the caller's output.
 ; RCX=identity*, EDX=parent cluster, R8=const FatCreate*, R9=FatEntry* out.
 ; EAX=status. Begin/end an isolated operation, then publish a fresh entry only
-; on F_OK. Name/request/output must not overlap; see fat32.h.
+; on F_OK. Name/request/output must not overlap; see fat32.inc.
 proc fat_create uses rbx rsi rdi r12 r13 r14
 	locals
 		entry FatEntry

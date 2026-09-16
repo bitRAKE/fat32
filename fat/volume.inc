@@ -17,7 +17,7 @@ endp
 ; mount(identity, ops, OEM_map_or_null). Failed mounts leave magic clear.
 ; RCX=FatIdentity* out, RDX=const SectorOps*, R8=OEM uint16_t[256] or 0.
 ; EAX=status; F_OK publishes a mounted identity, failure leaves magic=0. Only
-; ops/OEM lifetime is retained. All pointers valid; see fat32.h for full contract.
+; ops/OEM lifetime is retained. All pointers valid; see fat32.inc for full contract.
 proc fat_mount uses rbx rsi rdi
 	mov rbx, rcx
 	mov rsi, rdx

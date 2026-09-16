@@ -1,4 +1,4 @@
-/* C ABI mirror for the verification harness. Production contracts: ../fat32.h. */
+/* C ABI mirror for the verification harness. Production contracts: ../fat32.inc. */
 #ifndef TEST_API_H
 #define TEST_API_H
 #include <stdint.h>
@@ -63,7 +63,7 @@ typedef struct WinVolume {
 } WinVolume;
 /* Win64 ABI; F_* status except void sb_end. Required structure/name pointers
    must be valid and nonoverlapping; callers own storage and serialize access.
-   No automatic null checks. See ../fat32.h and ../buffer.h for full contracts.
+   No automatic null checks. See ../fat32.inc and ../buffer.inc for full contracts.
    Use mounted identities/current-generation snapshots; reacquire after any
    mutation failure because rollback may have invalidated the old generation. */
 

@@ -236,7 +236,7 @@ endp
 
 ; RCX=identity*, RDX=const FatEntry* file, R8=FatTransfer* in-out.
 ; EAX=status; done reset/clamped to EOF, partial prefix reported on read failure.
-; Neither entry nor offset/length changes. See fat32.h for buffer/alias rules.
+; Neither entry nor offset/length changes. See fat32.inc for buffer/alias rules.
 proc fat_read uses rbx rsi rdi
 	locals
 		request FatTransfer

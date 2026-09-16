@@ -4,7 +4,7 @@ FAT32_WIN32 := 1
 define win32.select.types storage_filesystem,system_io,system_memory
 define win32.select.downlevel kernel32
 include 'common/policy.g'
-include 'buffer.h'
+include 'buffer.inc'
 
 ; RCX=adapter* out, RDX=UTF-16 raw path, R8D=write flag; EAX=status.
 public win_open

@@ -1,5 +1,9 @@
 # Implementation and verification
 
+For using this library in a UEFI-started OS, see
+[the OS development guide](examples/uefi/README.md). This document covers maintaining
+the library and its host-side verification tools.
+
 ## Style and build
 
 The production implementation is assembly. `common/policy.g` follows the
@@ -18,8 +22,8 @@ fat32.asm                one filesystem library object
   fat/directory.inc      cursors, LFN/SFN decoding, lookup, slot mapping
   fat/file.inc           byte I/O, resize, metadata, snapshot checks
   fat/create.inc         create, grow directories, rename, remove
-fat32.h                  caller-owned identity and filesystem ABI
-buffer.asm / buffer.h    format-neutral staged sector versions
+fat32.inc                caller-owned identity and filesystem ABI
+buffer.asm / buffer.inc  format-neutral staged sector versions
 win32.asm                handle, sector geometry, lock, seek/read/write/flush
 example.asm              small CRT-free client
 tests/test.c             independent sparse-media fixtures and fault injection
@@ -28,6 +32,7 @@ tests/usb.c              raw/native interoperability harness
 tests/repo.c             committed pair-write/delete workload and FAT chain readback
 tests/run-repo.ps1       immutable Git corpus export and independent blob comparisons
 tests/api.h              C ABI mirror
+examples/uefi/           OS guide, assembly reader, and host firmware mock
 ```
 
 `nmake` produces `fat32.lib`, `sector.lib`, and `fatdemo.exe`. Test harnesses use
@@ -42,7 +47,7 @@ fields such as `request.done`. All nonvolatile pushes occur in PROC prologues.
 
 ### Parameters, register lifetimes, and exits
 
-`fat32.h` and `buffer.h` specify each public interface: register/width, required
+`fat32.inc` and `buffer.inc` specify each public interface: register/width, required
 storage, ownership, aliasing, success/failure output, and transaction lifetime.
 The export lists summarize the arguments; private helpers document their own
 contracts at the definition. Keep these three views consistent when editing.

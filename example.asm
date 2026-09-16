@@ -5,7 +5,7 @@ FAT32_WIN32 := 1
 define win32.select.types system_console,globalization
 define win32.select.downlevel kernel32
 include 'common/policy.g'
-include 'buffer.h'
+include 'buffer.inc'
 
 public mainCRTStartup
 public _load_config_used

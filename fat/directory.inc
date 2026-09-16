@@ -182,7 +182,7 @@ endp
 ; dir_next(identity, cursor, entry). F_END is distinct from I/O/corruption.
 ; RCX=identity*, RDX=FatCursor* in-out, R8=FatEntry* out -> EAX=status.
 ; F_OK yields an entry; F_END means exhausted. Output/cursor can be partially
-; changed on error. Caller must not use output unless F_OK; see fat32.h.
+; changed on error. Caller must not use output unless F_OK; see fat32.inc.
 proc fat_dir_next uses rbx rsi rdi r12 r13 r14
 	mov rbx, rcx
 	mov rsi, rdx

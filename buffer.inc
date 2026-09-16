@@ -53,9 +53,9 @@
 ;   All I/O callbacks return F_* and store native errors in volume.error on I/O
 ;   failure (not cleared by later success). LBA range failures do not set it.
 ;   Single-caller use is essential because seek+I/O share the handle file pointer.
-include 'fat32.h'
-if ~ definite BUFFER_H
-BUFFER_H := 1
+include 'fat32.inc'
+if ~ definite BUFFER_INC
+BUFFER_INC := 1
 struct SectorBuffer
 	?ops       SectorOps
 	?backend   dq ?

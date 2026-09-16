@@ -1,12 +1,13 @@
 # Library API
 
-The authoritative assembly contracts are [fat32.h](fat32.h) and
-[buffer.h](buffer.h). Each lists register arguments, widths, pointer direction,
+The authoritative assembly contracts are [fat32.inc](fat32.inc) and
+[buffer.inc](buffer.inc). Each lists register arguments, widths, pointer direction,
 storage lifetime, preconditions, and output validity on success and failure.
 The `public` declarations and procedure bodies also identify their arguments.
-`tests/api.h` is a C ABI mirror with layout assertions. All functions and callbacks
-use the Windows x64 calling convention. Except `sb_end` and the void `end` callback, EAX is a
-status: zero is success. `fat_dir_next` returns `F_END` (1) at directory end.
+The `.inc` files use assembly syntax; `tests/api.h` is a C ABI mirror with layout
+assertions. All functions and callbacks use the Windows x64 calling convention.
+Except `sb_end` and the void `end` callback, EAX is a status: zero is success.
+`fat_dir_next` returns `F_END` (1) at directory end.
 
 All state and output buffers are caller-owned. Zero identities and adapters
 before first use. Keep the operations table, its context, and an optional OEM

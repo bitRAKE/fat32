@@ -107,8 +107,8 @@
 ;   Delete associated valid LFN/SFN records and free the chain. F_NOTEMPTY for
 ;   a directory with non-dot children; reject readonly, dot, root/self links.
 ;   Input memory is unchanged; after success the snapshot is invalid/stale.
-if ~ definite FAT32_H
-FAT32_H := 1
+if ~ definite FAT32_INC
+FAT32_INC := 1
 
 F_OK          := 0
 F_END         := 1

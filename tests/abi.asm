@@ -1,6 +1,6 @@
 ; ABI regression support; linked only into tests.exe, never production libs.
 include '../common/policy.g'
-include '../fat32.h'
+include '../fat32.inc'
 
 ; RCX=SectorOps* forwarding target; remaining arguments already in RDX/R8.
 ; Check entry stack alignment, call the real callback, preserve only EAX status,
