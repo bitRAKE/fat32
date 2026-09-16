@@ -11,6 +11,12 @@ $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $evidence=[IO.Path]::GetFullPath($EvidenceDirectory)
 if ($evidence.StartsWith($Drive,[StringComparison]::OrdinalIgnoreCase)) { throw 'Keep evidence off the device' }
+# Raw transcripts and captures are private local artifacts. Refuse a path in
+# this checkout unless Git ignores it, including a force-tracked path.
+if ($evidence.StartsWith($repo+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {
+    & git -C $repo check-ignore -q -- (Join-Path $evidence 'identity.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Use an ignored output directory such as build\64k, or a path outside the repository' }
+}
 if (Test-Path -LiteralPath $evidence) { throw 'Choose a new evidence directory' }
 function Assert-Identity {
     $logical=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$Drive'"

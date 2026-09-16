@@ -1,4 +1,4 @@
-; Object policy adapted from common\policy.g.
+; Shared MS64 NEWCOFF object, static-RSP, unwind, and CodeView policy.
 ; Core objects use struct/proc only. Win32 adapters opt into the projection.
 if ~ definite FAT32_POLICY_INCLUDED
 FAT32_POLICY_INCLUDED := 1
@@ -27,7 +27,7 @@ else
 	include 'macro/struct.inc'
 end if
 
-; Preserve the grouped USES list through the debug wrapper, as in hexed.
+; Preserve the grouped USES list through the debug wrapper.
 ; Each public routine saves its nonvolatile registers: no ambient RBX.
 macro fat32_debug_prologue procname,flag,parmbytes,localbytes,reglist
 	cvproc procname

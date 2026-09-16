@@ -7,7 +7,7 @@ the library and its host-side verification tools.
 ## Style and build
 
 The production implementation is assembly. `common/policy.g` follows the
-NEWCOFF, static-RSP, CodeView, and unwind policy in `hexed`. It retains
+NEWCOFF, static-RSP, CodeView, and unwind policy in [common/policy.g](common/policy.g). It retains
 the installed toolchain's format-finalizer and grouped-USES workarounds. Unlike
 an application with a permanent RBX state pointer, each library entry preserves
 the complete Win64 nonvolatile contract for arbitrary callers.
@@ -37,13 +37,13 @@ tests/api.h              C ABI mirror
 examples/uefi/           OS guide, assembly reader, and host firmware mock
 ```
 
-For the 64 KiB specification boundary, failure analysis, and capture-replay
+For 64 KiB arithmetic, media consistency, and capture-replay
 workflow, see [CLUSTER64.md](CLUSTER64.md). An unlocked live-volume read is not a
 consistent filesystem snapshot; raw/native comparisons assume stable contents.
 
 `nmake` produces `fat32.lib`, `sector.lib`, and `fatdemo.exe`. Test harnesses use
 the C runtime; the production libraries do not. `fatdemo.exe` imports only
-KERNEL32 and carries hexed's subsystem-10 load configuration. `nmake verify`
+KERNEL32 and carries the subsystem-10 load configuration. `nmake verify`
 prints unwind records, undefined core symbols, and executable imports, and emits
 the core disassembly. Structure layouts are asserted in assembly and C.
 

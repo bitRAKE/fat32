@@ -7,5 +7,3 @@
 *.md text eol=lf
 makefile text eol=crlf
 * text=auto
-# Preserve progress-line padding emitted by FORMAT and CHKDSK in captured logs.
-tests/evidence/**/*.txt whitespace=-blank-at-eol

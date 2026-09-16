@@ -11,12 +11,18 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import zipfile
 
 manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
 serial = int(sys.argv[2], 16)
-output = Path(sys.argv[3])
+output = Path(sys.argv[3]).resolve()
+repo = Path(__file__).resolve().parents[1]
+if output.is_relative_to(repo):
+    ignored = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", "--", str(output / "sectors.zip")])
+    if ignored.returncode:
+        raise ValueError("Use ignored build/ storage or an output directory outside the repository")
 output.mkdir(parents=True, exist_ok=False)
 destination = manifest["Destination"]
 drive = destination[:2]

@@ -6,3 +6,6 @@
 *.response
 *.objdump.txt
 build/
+# Physical test logs and raw captures contain local device information.
+tests/evidence/
+__pycache__/

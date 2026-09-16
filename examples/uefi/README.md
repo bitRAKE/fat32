@@ -2,7 +2,7 @@
 
 This guide is for an assembly-language OS developer starting through UEFI.
 It follows the library in this repository, including its actual register and
-transaction contracts. The repository is at `.`.
+transaction contracts.
 
 The integration point is **a bounded, synchronous sector provider**. Link
 `fat32.lib` into your loader or kernel, supply `SectorOps`, and keep one
@@ -20,10 +20,8 @@ Read [fat32.inc](../../fat32.inc) for the exact filesystem ABI and
 describes the implementation; [VALIDATION.md](../../VALIDATION.md) records tests
 and their limits.
 
-The library accepts clusters through 64 KiB, including Windows-formatted media.
-The older FAT specification discourages clusters above 32 KiB, and Windows
-compatibility does not establish firmware bootability. See
-[the 64 KiB investigation](../../CLUSTER64.md) for primary sources and tests.
+The library supports clusters through 64 KiB for this x86-64 target. See
+[64 KiB support](../../CLUSTER64.md) for arithmetic and validation coverage.
 Keep the backing volume stable against other writers while an identity caches
 its metadata; after external edits stop, invalidate and reacquire snapshots.
 

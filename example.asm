@@ -1,4 +1,4 @@
-; Minimal read-only client. Prints the root names of TESTING (X:).
+; Minimal read-only client. Set the sample device below before running.
 ; All filesystem calls go through fat32.lib; the application has no BPB,
 ; FAT entry, cluster traversal, or directory-record interpretation.
 FAT32_WIN32 := 1
@@ -65,7 +65,7 @@ device dw '\', '\', '.', '\', 'X', ':', 0
 message db 'FAT32 operation failed. Run usbcheck X: for diagnostic detail.',13,10
 message_bytes = $-message
 
-; The subsystem-10 normal-loader policy used by hexed.
+; Subsystem-10 normal-loader policy.
 align 8
 _load_config_used:
 	dd 148,0

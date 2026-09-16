@@ -1,171 +1,129 @@
 # fat32
 
-A FAT32 library in the assembly style of `hexed`: fasmg/fasm2,
-MS64 NEWCOFF objects, explicit state structures, Win64 procedures, and NMAKE.
+An x86-64 FAT32 library written in fasmg/fasm2 assembly, for UEFI loaders and
+modern operating systems. It uses the Win64 calling convention, MS64 NEWCOFF
+objects, explicit state structures, and NMAKE.
 
-The filesystem library has **no Win32 imports and no allocator dependency**.
-It consumes a transactional sector-buffer interface. The supplied Win32 adapter
-and buffer are separate objects in a separate library.
+The filesystem library has **no Win32 imports or allocator dependency**. All
+FAT32 geometry, FAT chains, directories, file data, and metadata belong to
+`fat32.lib`. The caller supplies a sector provider and owns the `FatIdentity`
+that caches volume, FAT, and directory information.
 
 ```text
-client: file names, metadata, byte ranges
-                  |
-              fat32.lib
-   FAT32 routines + caller-owned FatIdentity
-    [boot sector | FAT cache | directory cache]
-                  |
-               SectorOps
-       read / stage / begin / accept-or-rollback
-                  |
-              sector.lib
-     SectorBuffer: Win32-allocated sector versions
-                  |
-       WinVolume: raw volume sector I/O
-                  |
-             \\.\X: or another backend
+loader / kernel / application
+             |
+         fat32.lib
+             |
+         SectorOps
+             |
+optional sector staging
+             |
+UEFI Block I/O / kernel driver / Win32 adapter
 ```
 
-## Included
+## Features
 
-- FAT32 geometry validation, 512–4096-byte sectors, clusters through **64 KiB**.
-- Directory enumeration, component lookup, checked UTF-16 long names and OEM
-  short names; long names can cross sector and cluster boundaries.
-- File reads, overwrite, extension, truncation, and zero-filled gaps.
-- File and directory creation, same-directory rename, and empty-directory removal.
-- Attributes and all FAT timestamp fields, with the original 32-byte short entry
-  retained for exact inspection and preservation.
-- FAT mirroring, active-FAT selection, reserved-nibble preservation, bounded
-  chain validation, and advisory FSInfo invalidation.
-- Atomic **in-memory** operations: a failed mutation restores its staged sectors.
-  Explicit buffer commit is the only route to physical writes.
-- Documented register, buffer, lifetime, and failure contracts at the public
-  interfaces, with ABI regression probes and shared assembly exit sequences.
+- 512–4096-byte sectors and clusters through **64 KiB**.
+- File and directory enumeration, creation, same-parent rename, and deletion.
+- Arbitrary file reads, overwrite, extension, truncation, and zero-filled gaps.
+- UTF-16 long names across sector/cluster boundaries; OEM short-name decoding.
+- Attributes and packed FAT creation, access, and modification timestamps.
+- FAT mirroring, active-FAT selection, reserved-bit preservation, and bounded
+  chain validation. FSInfo remains advisory.
+- Atomic in-memory mutation savepoints and explicit sector commits.
+- Documented register, ownership, lifetime, and error contracts.
 
-## Build and run
+Start with [examples/uefi](examples/uefi/README.md) for OS integration,
+[API.md](API.md) for interfaces, and [DEVELOPING.md](DEVELOPING.md) for internals.
 
-From an x64 Visual Studio developer prompt:
+## Build
+
+Install the x64 Visual Studio C++ tools, fasm2, and the generated Win32 projection
+from win32json. By default, the makefile expects sibling `../fasm2` and
+`../win32json` directories. Override `FASM2_ROOT` and `WIN32JSON_ROOT` in the
+environment or as NMAKE arguments when using a different layout. LLVM tools for
+`verify` come from PATH or `LLVM_BIN`.
 
 ```cmd
-nmake
-nmake test
-nmake usbcheck.exe
-nmake verify
-fatdemo.exe
-usbcheck.exe X:
+build.cmd all test examples examples-test usbcheck.exe repocheck.exe
+build.cmd verify
 ```
 
-`build.cmd` selects the installed Visual Studio 18 Community x64 tools on this
-machine. For example, `build.cmd all test usbcheck.exe` builds everything needed
-for the checks. Tool paths are at the top of `makefile`.
-
-Outputs:
+`build.cmd` uses an existing developer environment or discovers Visual Studio
+through `vswhere`. An x64 developer prompt can also run NMAKE directly.
 
 | Output | Purpose |
 | --- | --- |
-| `fat32.lib` | All FAT32 algorithms; no unresolved external dependencies |
-| `sector.lib` | Win32 raw-volume adapter and generic sector staging |
-| `fatdemo.exe` | CRT-free assembly example; lists X:'s root, read-only |
-| `tests.exe` | Synthetic, failure-injection, and Win32 sector-file tests |
-| `usbcheck.exe` | Compare raw file reads with normal Windows file reads |
-| `repocheck.exe` | Persisted fragmentation workload and raw readback for Git verification |
+| `fat32.lib` | Filesystem algorithms and caller-owned identity |
+| `sector.lib` | Optional Win32 transport and generic staging buffer |
+| `fatdemo.exe` | Minimal assembly client; set its sample device in `example.asm` |
+| `tests.exe` | Synthetic media, fault injection, ABI, and sector-file tests |
+| `ueficheck.exe` | UEFI adapter host mock |
+| `usbcheck.exe` | Raw/native interoperability and capture replay |
+| `repocheck.exe` | Git-blob pair-write/delete workload |
 
-`usbcheck X: --write-test` additionally creates an isolated, uniquely named test
-directory through the library. It checks raw creation, repeated flushes, a patch
-across a cluster boundary, zero-filled growth, Unicode rename, packed metadata,
-truncation, and deletion. Windows independently verifies committed file bytes and
-metadata between phases. It first requires a complete read comparison and a
-FAT32 volume named TESTING. Writable opening acquires a volume lock; close
-dismounts after explicit commits, while the lock is still held.
+## Physical tests
 
-`usbcheck X: --flush-test` checks two explicit flushes on one locked handle without
-staging sector changes. The earlier **32 KiB** format passed the complete write
-test twice, 18 automated suites, and read-only CHKDSK. Logs, hashes, and the
-failure that led to the flush-lifetime fix
-are recorded in [VALIDATION.md](VALIDATION.md).
-
-### 64 KiB verification
-
-TESTING (X:) now uses 64 KiB clusters, serial `$VolumeSerial`. The fresh format passed
-native/raw file and metadata comparisons, library mutations, directory growth
-across the 64 KiB boundary, a locked independent FAT/hash oracle, immutable
-sector-capture replay, and CHKDSK. All **28 automated suites** also pass.
-See [the specification and failure investigation](CLUSTER64.md), including the
-initial transient unlocked-read failure and the limits of the historical evidence.
-
-`tests/run-64k.ps1` runs the guarded physical regression without formatting.
-`usbcheck X: --directory-test` exercises a Windows-created directory whose LFN
-set must cross into a newly allocated cluster. `tests/inspect-64k.py` captures a
-locked view for `usbcheck X: --capture sector-directory` to replay.
-
-### Repository fragmentation test
-
-Build `repocheck.exe` and `usbcheck.exe`, then run the PowerShell 7 driver with
-the current volume serial (eight hexadecimal digits) and a new evidence folder:
+The runners require an explicitly selected FAT32 test volume labeled `TESTING`,
+its volume serial, and its USB device serial. Supply those values locally; they
+are not repository defaults. The runners do not format the device. `X:` below
+is a placeholder for the selected test volume.
 
 ```powershell
-.\build.cmd repocheck.exe usbcheck.exe
-.\tests\run-repo.ps1 -Drive X: -ExpectedSerial $VolumeSerial -Revision HEAD `
-  -EvidenceDirectory tests\evidence\2026-09-15-512b
+.\tests\run-64k.ps1 -Drive $TestDrive -ExpectedSerial $VolumeSerial `
+  -ExpectedDeviceSerial $UsbSerial -EvidenceDirectory build\64k
+
+.\tests\run-repo.ps1 -Drive $TestDrive -ExpectedSerial $VolumeSerial `
+  -ExpectedDeviceSerial $UsbSerial -Revision HEAD -EvidenceDirectory build\repo-test
 ```
 
-The driver pins the commit, sorts all regular tracked files by blob size and
-path, and exports their exact committed bytes. The loop is:
+`run-64k.ps1` requires 64 KiB clusters. It checks Windows-created boundary files,
+raw-library mutations, and directory growth across a cluster boundary.
+`tests/inspect-64k.py` independently verifies FAT chains and hashes while holding
+a volume lock, and saves a sparse sector capture for replay:
+
+```powershell
+py -3 tests\inspect-64k.py build\64k\native-fixtures.json $VolumeSerial build\capture
+Expand-Archive build\capture\sectors.zip build\replay
+.\usbcheck.exe X: --capture build\replay
+```
+
+`run-repo.ps1` requires 512-byte sectors/clusters. It exports exact Git blobs,
+ordered by size, and performs repeated passes over missing files:
 
 ```text
-pass 1: write A, write B, delete A; write C, write D, delete C; ...
-pass 2: repeat over missing A, C, E, ...
-later:  repeat until none are missing; keep an unpaired final file
+write A, write B, delete A; write C, write D, delete C; ...
+repeat over missing files until all remain; keep an unpaired final file
 ```
 
-Each file write/deletion reaches an explicit physical commit. After closing and
-reopening the volume, the library records each actual FAT chain and reads each
-file back to local storage. Git hashes both that raw readback and a separate
-native Windows read; every result must equal its original blob ID. At least one
-final file must have multiple noncontiguous cluster extents. File-cluster
-ownership is checked across the copied files, and CHKDSK runs before and after.
+Every write/delete is committed. Fresh raw-library and native Windows reads must
+match each original Git blob ID. The runner records chains, requires measured
+fragmentation, and checks file-cluster ownership. Fixtures remain in a unique
+directory on the test volume.
 
-This test requires the named USB identity and **512-byte sectors/clusters**. It
-leaves every file under a unique `FAT32-repo-...` directory with the repository
-hierarchy preserved. It does not format the volume. The driver accepts up to
-4096 ordinary files of at most 16 MiB each and currently uses SHA-1 Git repos.
-
-Git's [blob IDs](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects) already
-identify committed file content. The test uses `git cat-file blob` and
-[`git hash-object --no-filters`](https://git-scm.com/docs/git-hash-object), so CRLF
-checkout conversion cannot hide changed bytes or produce false mismatches.
-Untracked build products and `.git` internals are outside the pinned tree.
-
-The 512-byte-cluster run at commit `bd5370b` passed: 45/45 files match their Git
-blob IDs through raw and native reads, after six passes, 86 writes, and 41
-deletions. Six final files have fragmented chains (up to 12 extents). The files
-remain under `X:\FAT32-repo-session`. See
-[the validation record](VALIDATION.md) for the pinned corpus and evidence.
+Generated logs, manifests, and sector captures are **local artifacts**. Keep them
+under ignored `build/` or `tests/evidence/`, or outside the repository. They can
+contain device identifiers and captured file contents. [VALIDATION.md](VALIDATION.md)
+contains the publication-safe coverage summary.
 
 ## Contracts and scope
 
-For an assembly OS starting through UEFI, begin with
-[examples/uefi](examples/uefi/README.md): sector-provider integration, assembly
-examples, transactional writes, and the loader/kernel handoff.
-Use [API.md](API.md) for the API index and [DEVELOPING.md](DEVELOPING.md)
-for implementation, cache, transaction, ABI, and durability rules.
+64 KiB clusters are part of the supported geometry for this modern x86-64 target.
+See [CLUSTER64.md](CLUSTER64.md) for implementation boundaries and test coverage.
+
+The backing volume must remain stable while an identity caches its metadata.
+Serialize library calls and exclude external writers, or use an immutable
+snapshot. The read-only Win32 adapter does not acquire a volume lock.
 
 Physical commit is not a journal and is not atomic across a crash or power loss.
-An I/O failure during commit poisons the buffer. This library is not a volume
-repair tool: global cross-link detection, orphan recovery, formatting, partition
-discovery, and moving entries between directories are outside its API.
+A failed commit poisons the staging buffer. Global cross-link repair, orphan
+recovery, formatting, partition discovery, and cross-parent moves are outside
+the API. Lookup folds ASCII case; other UTF-16 units compare exactly. Short names
+use CP437 by default, with a caller-provided OEM table available at mount.
 
-Lookup folds ASCII case; other UTF-16 code units compare exactly. The default
-short-name decoding is CP437, with a caller-provided OEM table available at mount.
+## References
 
-## Format references
-
-- [Microsoft FAT specification, version 1.03](https://www.pcjs.org/documents/papers/microsoft/MS_FAT_OVERVIEW_103-2000-12-06.pdf)
+- [Microsoft FAT format specification](https://www.pcjs.org/documents/papers/microsoft/MS_FAT_OVERVIEW_103-2000-12-06.pdf)
+- [UEFI media access protocols](https://uefi.org/specs/UEFI/2.11/13_Protocols_Media_Access.html)
 - [Win32 volume handles](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
-- [Unbuffered file I/O](https://learn.microsoft.com/en-us/windows/win32/fileio/file-buffering)
 - [Volume locking](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_lock_volume)
-
-64 KiB clusters are documented by Microsoft's current formatter, although the
-older FAT specification explicitly discourages clusters above 32 KiB. This
-library supports the Windows geometry; firmware portability must be established
-separately. Physical read/write coverage includes 512-byte, 32 KiB and 64 KiB
-clusters. See [CLUSTER64.md](CLUSTER64.md) for primary sources and evidence.

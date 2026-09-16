@@ -55,6 +55,10 @@ if ($logical.VolumeName -cne 'TESTING' -or $logical.FileSystem -cne 'FAT32' -or
 }
 $evidence=[IO.Path]::GetFullPath($EvidenceDirectory)
 if ($evidence.StartsWith($Drive,[StringComparison]::OrdinalIgnoreCase)) { throw 'Keep evidence off the test drive' }
+if ($evidence.StartsWith($repo+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {
+    & git -C $repo check-ignore -q -- (Join-Path $evidence 'identity.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Use an ignored output directory such as build\repo-test, or a path outside the repository' }
+}
 if (Test-Path -LiteralPath $evidence) { throw 'Use a new evidence directory; existing runs are preserved' }
 New-Item -ItemType Directory -Path $evidence | Out-Null
 $work=Join-Path $repo ('build\repo-'+[guid]::NewGuid().ToString('N'))

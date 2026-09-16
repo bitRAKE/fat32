@@ -1,15 +1,29 @@
-# One object-first trajectory, matching hexed.
-fasm2root = ..\fasm2
-win32json = ..\win32json
+# Object-first build. Environment or NMAKE arguments may override tool roots.
+!IFNDEF FASM2_ROOT
+FASM2_ROOT = ..\fasm2
+!ENDIF
+!IFNDEF WIN32JSON_ROOT
+WIN32JSON_ROOT = ..\win32json
+!ENDIF
+fasm2root = $(FASM2_ROOT)
+win32json = $(WIN32JSON_ROOT)
 fasm2 = $(fasm2root)\fasmg.exe
 calminc = $(win32json)\generated\fasm2_calm\x64;$(win32json);$(fasm2root)\include
-llvmbin = ..\llvm\bin
+!IFDEF LLVM_BIN
+llvm_readobj = "$(LLVM_BIN)\llvm-readobj.exe"
+llvm_nm = "$(LLVM_BIN)\llvm-nm.exe"
+llvm_objdump = "$(LLVM_BIN)\llvm-objdump.exe"
+!ELSE
+llvm_readobj = llvm-readobj.exe
+llvm_nm = llvm-nm.exe
+llvm_objdump = llvm-objdump.exe
+!ENDIF
 
 .SUFFIXES:
 .SUFFIXES: .asm .obj
 .asm.obj:
 	set INCLUDE=$(calminc);$(INCLUDE)
-	$(fasm2) -e 5 $< $@
+	"$(fasm2)" -e 5 $< $@
 
 all: fat32.lib sector.lib fatdemo.exe
 fat32.lib: fat32.obj
@@ -42,9 +56,9 @@ ueficheck.exe: examples\uefi\test.c tests\api.h examples\uefi\reader.obj fat32.l
 	cl /nologo /std:c17 /utf-8 /W4 /WX /Zi /Od /Fo:examples\uefi\test.obj /Fe:$@ examples\uefi\test.c examples\uefi\reader.obj fat32.lib /link /incremental:no
 
 verify: all
-	"$(llvmbin)\llvm-readobj.exe" --unwind fat32.obj buffer.obj win32.obj
-	"$(llvmbin)\llvm-nm.exe" --undefined-only fat32.obj
-	"$(llvmbin)\llvm-objdump.exe" -d fat32.obj > fat32.objdump.txt
-	"$(llvmbin)\llvm-readobj.exe" --coff-imports fatdemo.exe
+	$(llvm_readobj) --unwind fat32.obj buffer.obj win32.obj
+	$(llvm_nm) --undefined-only fat32.obj
+	$(llvm_objdump) -d fat32.obj > fat32.objdump.txt
+	$(llvm_readobj) --coff-imports fatdemo.exe
 
 .SILENT:
