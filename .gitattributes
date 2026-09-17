@@ -1,6 +1,8 @@
 *.asm text eol=crlf
 *.inc text eol=crlf
+*.inc linguist-language=Assembly
 *.g text eol=crlf
+*.g linguist-language=Assembly
 *.h text eol=crlf
 *.c text eol=crlf
 *.cmd text eol=crlf

@@ -47,7 +47,7 @@ body:
 .loop:
     mov [rbp + FatCheck.cluster], r15d
     mov qword [rbp + FatCheck.sector], -1
-    lea eax, [r15d-2]
+    lea eax, [r15-2]
     cmp eax, [rbx + FatIdentity.cluster_count]
     jae .link
     xor edi, edi
@@ -68,7 +68,7 @@ body:
     ; A full extent array can still extend the last contiguous run.
     test edi, edi
     jz .new
-    lea esi, [edi-1]
+    lea esi, [rdi-1]
     mov eax, [r14 + rsi*8 + FatExtent.first]
     add eax, [r14 + rsi*8 + FatExtent.count]
     cmp eax, r15d
@@ -104,7 +104,7 @@ body:
 .admit:
     test edi, edi
     jz .append
-    lea esi, [edi-1]
+    lea esi, [rdi-1]
     mov eax, [r14 + rsi*8 + FatExtent.first]
     add eax, [r14 + rsi*8 + FatExtent.count]
     cmp eax, r15d

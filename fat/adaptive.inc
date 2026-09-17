@@ -25,7 +25,7 @@ proc fat_read_adaptive uses rbx rsi rdi rbp
 	fastcall fat_check_file, rbx, [rdi + FatCheckedRead.budget], [rdi + FatCheckedRead.report]
 	; A successful diagnosis cannot turn a failed read into success. Diagnostics
 	; do not touch the caller's output, completed prefix or independent position.
-	mov eax, ebp
+	xchg eax, ebp
 .done:
 	ret
 endp

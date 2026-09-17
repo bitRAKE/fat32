@@ -25,17 +25,17 @@ proc fat_mount uses rbx rsi rdi rbp
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rbp, r9
-	mov qword [rbx + FatIdentity.oem], r8
-	mov dword [rbx + FatIdentity.magic], 0
-	mov dword [rbx + FatIdentity.transaction], 0
-	mov qword [rbx + FatIdentity.ops], rsi
+	mov qword [rcx + FatIdentity.oem], r8
+	mov dword [rcx + FatIdentity.magic], 0
+	mov dword [rcx + FatIdentity.transaction], 0
+	mov qword [rcx + FatIdentity.ops], rdx
 	fastcall fat_invalidate, rcx
 	mov eax, dword [rsi + SectorOps.sector_bytes]
 	cmp eax, 512
 	jb .format
 	cmp eax, F_MAX_SECTOR
 	ja .format
-	lea edx, [eax-1]
+	lea edx, [rax-1]
 	test eax, edx
 	jnz .format
 	cmp qword [rsi + SectorOps.sectors], 1
@@ -43,7 +43,7 @@ proc fat_mount uses rbx rsi rdi rbp
 	cmp qword [rsi + SectorOps.read], 0
 	je .format
 	mov dword [rbx + FatIdentity.sector_bytes], eax
-	lea edx, [eax+eax*2]
+	lea edx, [rax+rax*2]
 	cmp dword [rbp + FatWorkspace.bytes], edx
 	jb .memory
 	cmp dword [rbp + FatWorkspace.reserved], 0
@@ -69,7 +69,7 @@ proc fat_mount uses rbx rsi rdi rbp
 	jz .format
 	cmp eax, 128
 	ja .format
-	lea edx, [eax-1]
+	lea edx, [rax-1]
 	test eax, edx
 	jnz .format
 	mov dword [rbx + FatIdentity.cluster_sectors], eax
@@ -116,7 +116,7 @@ proc fat_mount uses rbx rsi rdi rbp
 	cmp eax, 0FFFFFEEh        ; keep all reserved values out of data IDs
 	ja .format
 	mov dword [rbx + FatIdentity.cluster_count], eax
-	lea ecx, [eax+2]
+	lea ecx, [rax+2]
 	mov eax, dword [rbx + FatIdentity.fat_sectors]
 	mov edx, dword [rbx + FatIdentity.sector_bytes]
 	imul rax, rdx
@@ -203,8 +203,8 @@ proc f_write_sector
 	jae .done
 	mov qword [rcx + FatIdentity.fat_lba], -1
 	mov qword [rcx + FatIdentity.dir_lba], -1
-	mov r9, qword [rcx + FatIdentity.ops]
-	fastcall [r9 + SectorOps.write], [r9 + SectorOps.context], rdx, r8
+	mov rax, qword [rcx + FatIdentity.ops]
+	fastcall [rax + SectorOps.write], [rax + SectorOps.context], rdx, r8
 .done:
 	ret
 endp
@@ -217,9 +217,9 @@ section '.text$f_directory' code readable executable comdat align 16
 proc f_directory uses rbx rsi
 	mov rbx, rcx
 	mov rsi, rdx
-	cmp rdx, [rbx + FatIdentity.dir_lba]
+	cmp rdx, [rcx + FatIdentity.dir_lba]
 	je .hit
-	mov qword [rbx + FatIdentity.dir_lba], -1
+	mov qword [rcx + FatIdentity.dir_lba], -1
 	fastcall f_read_sector, rcx, rdx, [rcx + FatIdentity.directory]
 	test eax, eax
 	jnz .done
@@ -236,18 +236,20 @@ endp
 ; RBX/RSI/RDI retain identity/output/byte offset across the sector callback.
 section '.text$fat_get' code readable executable comdat any align 16
 proc fat_get uses rbx rsi rdi
+	mov eax, F_CORRUPT
+	cmp dword [rcx + FatIdentity.magic], F_MAGIC
+	jne .done
+	mov edi, dword [rcx + FatIdentity.cluster_count]
+	add edi, 2
+	cmp edx, edi
+	jae .done
 	mov rbx, rcx
-	mov rsi, r8
-	cmp dword [rbx + FatIdentity.magic], F_MAGIC
-	jne .bad
-	mov eax, dword [rbx + FatIdentity.cluster_count]
-	add eax, 2
-	cmp edx, eax
-	jae .bad
 	mov eax, edx
+	mov rsi, r8
+
 	shl rax, 2
+	mov ecx, dword [rcx + FatIdentity.sector_bytes]
 	xor edx, edx
-	mov ecx, dword [rbx + FatIdentity.sector_bytes]
 	div rcx
 	mov edi, edx
 	mov edx, dword [rbx + FatIdentity.active_fat]
@@ -261,8 +263,8 @@ proc fat_get uses rbx rsi rdi
 	test eax, eax
 	jnz .failed
 .hit:
-	mov r9, qword [rbx + FatIdentity.fat]
-	mov eax, dword [r9 + rdi]
+	mov rbx, qword [rbx + FatIdentity.fat]
+	mov eax, dword [rbx + rdi]
 	and eax, F_MASK
 	mov dword [rsi], eax
 	xor eax, eax
@@ -270,9 +272,6 @@ proc fat_get uses rbx rsi rdi
 	ret
 .failed:
 	mov qword [rbx + FatIdentity.fat_lba], -1
-	jmp .done
-.bad:
-	mov eax, F_CORRUPT
 	jmp .done
 endp
 
@@ -290,23 +289,24 @@ proc fat_put uses rbx rsi rdi r12 rbp
 body:
 	mov rbx, rcx
 	mov eax, F_CORRUPT
-	cmp dword [rbx + FatIdentity.magic], F_MAGIC
+	cmp dword [rcx + FatIdentity.magic], F_MAGIC
 	jne .done
 	mov eax, F_ARGUMENT
 	test r8d, 0F0000000h
 	jnz .done
 	mov eax, F_BUSY
-	cmp dword [rbx + FatIdentity.transaction], 1
+	cmp dword [rcx + FatIdentity.transaction], 1
 	jne .done
 	mov r12d, r8d
-	mov eax, dword [rbx + FatIdentity.cluster_count]
-	add eax, 2
-	cmp edx, eax
-	jae .bad
+	mov ecx, dword [rcx + FatIdentity.cluster_count]
+	add ecx, 2
+	mov eax, F_CORRUPT
+	cmp edx, ecx
+	jae .done
 	mov eax, edx
+	mov ecx, dword [rbx + FatIdentity.sector_bytes]
 	shl rax, 2
 	xor edx, edx
-	mov ecx, dword [rbx + FatIdentity.sector_bytes]
 	div rcx
 	mov edi, edx
 	mov qword [part], rax
@@ -315,7 +315,7 @@ body:
 	cmp dword [rbx + FatIdentity.mirrored], 0
 	jne .copy
 	mov esi, dword [rbx + FatIdentity.active_fat]
-	lea ebp, [esi+1]
+	lea ebp, [rsi+1]
 .copy:
 	mov eax, esi
 	imul eax, [rbx + FatIdentity.fat_sectors]
@@ -330,22 +330,19 @@ body:
 	or eax, r12d
 	mov dword [r9 + rdi], eax
 	mov eax, esi
+	inc esi
 	imul eax, [rbx + FatIdentity.fat_sectors]
 	add eax, [rbx + FatIdentity.fat_start]
 	add rax, [part]
 	fastcall f_write_sector, rbx, rax, [rbx + FatIdentity.fat]
 	test eax, eax
 	jnz .done
-	inc esi
 	cmp esi, ebp
 	jb .copy
 	xor eax, eax
 .done:
 	mov qword [rbx + FatIdentity.fat_lba], -1
 	ret
-.bad:
-	mov eax, F_CORRUPT
-	jmp .done
 endp
 
 ; Map a data cluster to a relative sector. Private leaf: EDX -> RAX.
@@ -354,7 +351,7 @@ endp
 ; clobbers EDX/flags. No range check and no F_* status return.
 section '.text$f_cluster_sector' code readable executable comdat align 16
 proc f_cluster_sector
-	lea eax, [edx-2]
+	lea eax, [rdx-2]
 	mov edx, dword [rcx + FatIdentity.cluster_sectors]
 	imul rax, rdx
 	mov edx, dword [rcx + FatIdentity.data_start]
@@ -373,16 +370,17 @@ proc fat_chain uses rbx rsi rdi r12 r13 r14 rbp
 		next dd ?
 	endl
 body:
-	mov rbx, rcx
-	mov rsi, r8
-	mov edi, edx
-	mov qword [rsi], 0
-	test edi, edi
+	mov qword [r8], 0
+	test edx, edx
 	jz .ok
-	mov r12d, edi          ; checkpoint
+	mov rbx, rcx
+	mov edi, edx
+	mov rsi, r8
+
+	mov r12d, edx          ; checkpoint
 	mov r13d, 1            ; power
 	xor r14d, r14d         ; distance
-	xor ebp, ebp         ; count
+	xor ebp, ebp           ; count
 .loop:
 	cmp edi, 2
 	jb .bad
@@ -429,14 +427,13 @@ endp
 ; finish is due. RDX holds ops only until callback dispatch; RBX survives it.
 section '.text$f_begin' code readable executable comdat align 16
 proc f_begin uses rbx
-	mov rbx, rcx
 	mov eax, F_FORMAT
-	cmp dword [rbx + FatIdentity.magic], F_MAGIC
+	cmp dword [rcx + FatIdentity.magic], F_MAGIC
 	jne .done
 	mov eax, F_BUSY
-	cmp dword [rbx + FatIdentity.transaction], 0
+	cmp dword [rcx + FatIdentity.transaction], 0
 	jne .done
-	mov rdx, qword [rbx + FatIdentity.ops]
+	mov rdx, qword [rcx + FatIdentity.ops]
 	; Validate the optional extension before starting any savepoint.
 	mov eax, F_ARGUMENT
 	cmp dword [rdx + SectorOps.reserved], 0
@@ -457,6 +454,7 @@ proc f_begin uses rbx
 	je .done
 	cmp qword [rdx + SectorOps.end], 0
 	je .done
+	mov rbx, rcx
 	fastcall [rdx + SectorOps.begin], [rdx + SectorOps.context]
 	test eax, eax
 	jnz .done
@@ -486,7 +484,7 @@ endp
 section '.text$f_info_unknown' code readable executable comdat align 16
 proc f_info_unknown uses rbx rsi rdi
 	mov rbx, rcx
-	mov esi, dword [rbx + FatIdentity.fsinfo]
+	mov esi, dword [rcx + FatIdentity.fsinfo]
 	test esi, esi
 	jz .ok
 	xor edi, edi
@@ -494,15 +492,17 @@ proc f_info_unknown uses rbx rsi rdi
 	fastcall f_read_sector, rbx, rsi, [rbx + FatIdentity.scratch]
 	test eax, eax
 	jnz .done
-	mov r9, qword [rbx + FatIdentity.scratch]
-	cmp dword [r9], 41615252h
+	mov r8, qword [rbx + FatIdentity.scratch]
+	; All three FSInfo signatures must agree before changing either hint.
+	cmp dword [r8 + FDiskInfo.lead_signature], FSI_LEAD_SIGNATURE
 	jne .next
-	cmp dword [r9+484], 61417272h
+	cmp dword [r8 + FDiskInfo.structure_signature], FSI_STRUCTURE_SIGNATURE
 	jne .next
-	cmp dword [r9+508], 0AA550000h
+	cmp dword [r8 + FDiskInfo.trail_signature], FSI_TRAIL_SIGNATURE
 	jne .next
-	mov qword [r9+488], -1
-	fastcall f_write_sector, rbx, rsi, [rbx + FatIdentity.scratch]
+	; Adjacent free_count and next_free dwords both become unknown (FFFFFFFFh).
+	mov qword [r8 + FDiskInfo.free_count], -1
+	fastcall f_write_sector, rbx, rsi, r8
 	test eax, eax
 	jnz .done
 .next:
@@ -530,16 +530,16 @@ endp
 section '.text$f_finish' code readable executable comdat align 16
 proc f_finish uses rbx rdi
 	mov rbx, rcx
-	mov edi, edx
-	test edi, edi
+	mov eax, edx
+	test edx, edx
 	jnz .end
 	fastcall f_info_unknown, rcx
-	mov edi, eax
 .end:
 	mov r8, qword [rbx + FatIdentity.ops]
 	xor edx, edx
-	test edi, edi
+	test eax, eax
 	setz dl
+	xchg edi, eax
 	fastcall [r8 + SectorOps.end], [r8 + SectorOps.context], edx
 	mov dword [rbx + FatIdentity.transaction], 0
 	inc dword [rbx + FatIdentity.completions]
@@ -547,7 +547,7 @@ proc f_finish uses rbx rdi
 	mov qword [rbx + FatIdentity.dir_lba], -1
 	mov dword [rbx + FatIdentity.next_free], 2
 	mov dword [rbx + FatIdentity.free_hint], -1
-	mov eax, edi
+	xchg eax, edi
 	ret
 endp
 
@@ -564,10 +564,11 @@ proc f_snapshot_done uses rbx rsi rdi
 	jnz .done
 	test rsi, rsi
 	jz .done
+	; Invalidation advances the generation; publish the new value to this entry.
 	mov rax, qword [rbx + FatIdentity.generation]
 	mov qword [rsi + FatEntry.generation], rax
 .done:
-	mov eax, edi
+	xchg eax, edi
 	ret
 endp
 
@@ -585,8 +586,8 @@ proc f_allocate uses rbx rsi rdi rbp r13
 body:
 	mov rbx, rcx
 	mov rsi, rdx
-	mov edi, dword [rbx + FatIdentity.next_free]
-	mov ebp, dword [rbx + FatIdentity.cluster_count]
+	mov edi, dword [rcx + FatIdentity.next_free]
+	mov ebp, dword [rcx + FatIdentity.cluster_count]
 .scan:
 	fastcall fat_get, rbx, edi, addr value
 	test eax, eax
@@ -625,7 +626,7 @@ body:
 	cmp edi, [rbx + FatIdentity.cluster_sectors]
 	jb .zero
 	mov dword [rsi], ebp
-	lea eax, [ebp+1]
+	lea eax, [rbp+1]
 	mov ecx, dword [rbx + FatIdentity.cluster_count]
 	inc ecx
 	cmp eax, ecx

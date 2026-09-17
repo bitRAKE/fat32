@@ -2,8 +2,8 @@
 ; Scratch, options, report and backend remain disjoint and stable throughout.
 
 section '.text$fat_format_plan' code readable executable comdat any align 16
-proc fat_format_plan uses rbx rsi rdi rbp
-    mov rbx, rcx
+proc fat_format_plan uses rsi rdi rbp
+    mov r9, rcx
     mov rsi, rdx
     mov rbp, r8
     mov rdi, r8
@@ -53,12 +53,12 @@ proc fat_format_plan uses rbx rsi rdi rbp
     jnz .name
 .geometry:
     mov eax, F_FORMAT
-    mov r10d, [rbx + SectorOps.sector_bytes]
+    mov r10d, [r9 + SectorOps.sector_bytes]
     cmp r10d, 512
     jb .done
     cmp r10d, 4096
     ja .done
-    lea edx, [r10d-1]
+    lea edx, [r10-1]
     test r10d, edx
     jnz .done
     mov r11d, [rsi + FatFormatOptions.cluster_bytes]
@@ -66,10 +66,10 @@ proc fat_format_plan uses rbx rsi rdi rbp
     jb .done
     cmp r11d, F_MAX_CLUSTER
     ja .done
-    lea edx, [r11d-1]
+    lea edx, [r11-1]
     test r11d, edx
     jnz .done
-    mov rax, [rbx + SectorOps.sectors]
+    mov rax, [r9 + SectorOps.sectors]
     mov ecx, 0FFFFFFFFh
     cmp rax, rcx
     ja .range
@@ -241,8 +241,8 @@ proc f_format_emit uses rbx rsi
     mov dword [rsi + FatFormatReport.operation], FI_WRITE
     mov dword [rsi + FatFormatReport.effect], FE_UNCERTAIN
     inc qword [rsi + FatFormatReport.writes]
-    mov r9, [rbx + f_format_state.backend]
-    fastcall [r9 + SectorOps.write], [r9 + SectorOps.context], rdx, [rbx + f_format_state.scratch]
+    mov rax, [rbx + f_format_state.backend]
+    fastcall [rax + SectorOps.write], [rax + SectorOps.context], rdx, [rbx + f_format_state.scratch]
     test eax, eax
     jnz .done
     inc qword [rsi + FatFormatReport.completed_writes]
@@ -258,8 +258,8 @@ proc f_format_flush uses rbx
     mov rbx, [rcx + f_format_state.report]
     mov dword [rbx + FatFormatReport.operation], FI_FLUSH
     inc qword [rbx + FatFormatReport.flushes]
-    mov r9, [rcx + f_format_state.backend]
-    fastcall [r9 + SectorOps.flush], [r9 + SectorOps.context]
+    mov rax, [rcx + f_format_state.backend]
+    fastcall [rax + SectorOps.flush], [rax + SectorOps.context]
     test eax, eax
     jnz .done
     inc qword [rbx + FatFormatReport.completed_flushes]
@@ -370,13 +370,13 @@ body:
     mov word [rdi+510], 0AA55h
     jmp .reserved_write
 .info:
-    mov dword [rdi], 041615252h
-    mov dword [rdi+484], 061417272h
+    mov dword [rdi + FDiskInfo.lead_signature], FSI_LEAD_SIGNATURE
+    mov dword [rdi + FDiskInfo.structure_signature], FSI_STRUCTURE_SIGNATURE
     mov eax, [rbx + f_format_state.plan.cluster_count]
     dec eax
-    mov [rdi+488], eax
-    mov dword [rdi+492], 3
-    mov dword [rdi+508], 0AA550000h
+    mov [rdi + FDiskInfo.free_count], eax
+    mov dword [rdi + FDiskInfo.next_free], 3
+    mov dword [rdi + FDiskInfo.trail_signature], FSI_TRAIL_SIGNATURE
 .reserved_write:
     fastcall f_format_emit, rbx, rbp
     test eax, eax
@@ -463,8 +463,8 @@ proc f_format_verify uses rbx rsi rdi rbp
     jnz .done
     mov dword [rbp + FatFormatReport.operation], FI_READ
     inc qword [rbp + FatFormatReport.reads]
-    mov r9, [rbx + f_format_state.backend]
-    fastcall [r9 + SectorOps.read], [r9 + SectorOps.context], [rbp + FatFormatReport.lba], [rbx + f_format_state.verify_buffer]
+    mov rax, [rbx + f_format_state.backend]
+    fastcall [rax + SectorOps.read], [rax + SectorOps.context], [rbp + FatFormatReport.lba], [rbx + f_format_state.verify_buffer]
     test eax, eax
     jnz .done
     mov rsi, [rbx + f_format_state.scratch]

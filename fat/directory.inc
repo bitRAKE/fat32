@@ -5,29 +5,25 @@
 ; EAX=status. Check the first ID and initialize without I/O. Each followed link
 ; is checked by f_cursor_sector; full-chain diagnostics are optional.
 section '.text$fat_dir_open' code readable executable comdat any align 16
-proc fat_dir_open uses rbx rsi rdi
-	mov rbx, rcx
-	mov rsi, r8
-	mov edi, edx
+proc fat_dir_open uses rdi
 	mov eax, F_CORRUPT
-	cmp dword [rbx + FatIdentity.magic], F_MAGIC
+	cmp dword [rcx + FatIdentity.magic], F_MAGIC
 	jne .done
-	cmp edi, 2
+	cmp edx, 2
 	jb .done
-	mov ecx, [rbx + FatIdentity.cluster_count]
-	inc ecx
-	cmp edi, ecx
+	mov r9d, [rcx + FatIdentity.cluster_count]
+	inc r9d
+	cmp edx, r9d
 	ja .done
-	mov edx, edi
-	mov rdi, rsi
+	; Retain the stable generation while RCX clears the disjoint output cursor.
+	mov r9, qword [rcx + FatIdentity.generation]
+	mov rdi, r8
 	xor eax, eax
 	mov ecx, sizeof.FatCursor
 	rep stosb
-	mov rax, qword [rbx + FatIdentity.generation]
-	mov qword [rsi + FatCursor.generation], rax
-	mov dword [rsi + FatCursor.cluster], edx
-	mov dword [rsi + FatCursor.parent], edx
-	xor eax, eax
+	mov qword [r8 + FatCursor.generation], r9
+	mov dword [r8 + FatCursor.cluster], edx
+	mov dword [r8 + FatCursor.parent], edx
 .done:
 	ret
 endp
@@ -46,9 +42,10 @@ proc f_cursor_sector uses rbx rsi
 body:
 	mov rbx, rcx
 	mov rsi, rdx
-	mov rax, qword [rbx + FatIdentity.generation]
-	cmp rax, [rsi + FatCursor.generation]
-	jne .stale
+	mov r8, qword [rbx + FatIdentity.generation]
+	mov eax, F_STALE
+	cmp r8, [rsi + FatCursor.generation]
+	jne .done
 	cmp dword [rsi + FatCursor.ended], 0
 	jne .end
 	mov eax, dword [rsi + FatCursor.offset]
@@ -90,9 +87,6 @@ body:
 	jmp .done
 .bad:
 	mov eax, F_CORRUPT
-	jmp .done
-.stale:
-	mov eax, F_STALE
 	jmp .done
 endp
 
@@ -289,7 +283,7 @@ proc fat_dir_next uses rbx rsi rdi rbp r13 r14
 	jb .namecheck
 	test r14d, r14d
 	jz .length
-	lea r13d, [r14d-1]
+	lea r13d, [r14-1]
 .length:
 	test r13d, r13d
 	jz .short

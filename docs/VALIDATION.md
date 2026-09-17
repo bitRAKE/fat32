@@ -17,7 +17,7 @@ FAT32 extents without allocating an entire volume.
 | Files and directories | Reads, overwrite, zero-filled extension, truncation, metadata, same-parent rename, deletion, empty directories, LFN lengths and damage, alias fallback, and 4 GiB limits |
 | Allocation and mutation | Fragmented/backward chains, high-nibble preservation, active FATs, exhaustion, every staging failure, and preservation of the previous overlay on rollback |
 | Shared ownership | Canonical same-file objects, independent positions, affected-file versions, iterators, parent pins, pool/reference limits, and stale mounts |
-| ABI and workspace | All eight nonvolatile GPRs, callback alignment, volatile-register poisoning, exact three-sector workspaces, canaries, and failure before I/O on invalid storage |
+| ABI and workspace | All eight nonvolatile GPRs, callback alignment, volatile-register poisoning, nonzero upper halves of narrow register arguments, exact three-sector workspaces, canaries, and failure before I/O on invalid storage |
 | Concurrency | A competing thread while a provider/commit is suspended under the optional gate; busy callers preserve output/state |
 | Diagnostics | Bounded chains, logical directory/LFN structure, lookup-name collisions, allocation ownership, reserved status, BPB backups, FAT copies, and stale/incomplete evidence |
 | Recovery | Independent FAT views, explicit backup-BPB geometry, unique-prefix salvage, budgets, extent exhaustion, partial results, and source leases |
@@ -62,6 +62,15 @@ register substitutions, equivalent address expressions, and changed code offsets
 Branch destinations, relocation targets, saved-register sets, and stack allocations
 match the baseline; unwind metadata retains no frame-register assignment.
 
+The subsequent [coding-policy review](x86-64_coding_policy.md) reduces the
+27,150-byte release to **26,975 bytes**. Its initial volume pass saves 22 bytes;
+the library-wide pass saves another 153 across 39 smaller procedures, with one
+additional procedure changed at equal size. No reviewed procedure grows.
+The later pass removes 18 prologue register saves and five return instructions.
+All 149 procedures pass inspection of prologue/epilogue agreement with unwind,
+aligned calls with home space, branch destinations, and retained relocation
+targets and COMDAT associations. RBP remains available as a saved general register.
+
 The following linked `.text` sizes use the LLD release/archive profile with
 `/OPT:REF /OPT:NOICF`. They include the small probe and linker alignment; they
 are not the sum of selected procedure sizes and are not performance timings.
@@ -69,39 +78,39 @@ The tests enforce separate ceilings without relaxing them for this review.
 
 | Consumer profile | Code bytes |
 | --- | ---: |
-| `mount` | 682 |
-| `fat-view` | 1,034 |
-| `boot-view` | 1,226 |
-| `policy` | 1,770 |
-| `policy-read` | 5,994 |
-| `policy-adaptive` | 6,586 |
-| `salvage-plan` | 938 |
-| `salvage-read` | 1,338 |
+| `mount` | 666 |
+| `fat-view` | 1,002 |
+| `boot-view` | 1,194 |
+| `policy` | 1,754 |
+| `policy-read` | 5,898 |
+| `policy-adaptive` | 6,490 |
+| `salvage-plan` | 922 |
+| `salvage-read` | 1,322 |
 | `format-plan` | 474 |
 | `format` | 1,690 |
 | `format-verified` | 1,786 |
-| `put` | 1,018 |
-| `put-checked` | 1,210 |
-| `free-space` | 954 |
-| `read` | 3,978 |
-| `append` | 8,394 |
-| `full` | 9,962 |
-| `shared-read` | 4,410 |
-| `shared-write` | 9,290 |
-| `shared-full` | 11,482 |
-| `locked-read` | 4,490 |
-| `checked-read` | 5,226 |
-| `adaptive-read` | 5,242 |
-| `diagnostics` | 2,266 |
-| `directory-check` | 3,466 |
-| `name-check` | 5,226 |
-| `ownership-check` | 3,114 |
-| `ordered-write` | 11,466 |
-| `verified-write` | 11,578 |
-| `stream-read` | 4,554 |
-| `stream-map` | 4,378 |
-| `range-read` | 4,954 |
-| `ordered-range` | 12,986 |
+| `put` | 1,002 |
+| `put-checked` | 1,178 |
+| `free-space` | 922 |
+| `read` | 3,914 |
+| `append` | 8,314 |
+| `full` | 9,882 |
+| `shared-read` | 4,330 |
+| `shared-write` | 9,194 |
+| `shared-full` | 11,386 |
+| `locked-read` | 4,410 |
+| `checked-read` | 5,146 |
+| `adaptive-read` | 5,162 |
+| `diagnostics` | 2,234 |
+| `directory-check` | 3,386 |
+| `name-check` | 5,146 |
+| `ownership-check` | 3,066 |
+| `ordered-write` | 11,354 |
+| `verified-write` | 11,466 |
+| `stream-read` | 4,474 |
+| `stream-map` | 4,298 |
+| `range-read` | 4,874 |
+| `ordered-range` | 12,874 |
 
 
 Per-function `.pdata`, `.xdata`, and CodeView contributions remain associated

@@ -20,30 +20,31 @@ endp
 ; RCX=fresh order*, RDX=borrowed backend*, R8=workspace descriptor*. The
 ; descriptor is borrowed for this call; its data/index arrays are retained.
 section '.text$fat_order_init' code readable executable comdat any align 16
-proc fat_order_init uses rbx rsi rdi rbp
+proc fat_order_init uses rbx rdi
+	; Backend/workspace stay volatile; neither is needed after the final reset.
 	mov rbx, rcx
-	mov rsi, rdx
-	mov rbp, r8
+	mov r9, r8
+	mov r8, rdx
 	mov eax, F_ARGUMENT
-	cmp qword [rsi + SectorOps.read], 0
+	cmp qword [r8 + SectorOps.read], 0
 	je .done
-	cmp qword [rsi + SectorOps.sectors], 0
+	cmp qword [r8 + SectorOps.sectors], 0
 	je .done
-	cmp dword [rbp + FatOrderWorkspace.reserved], 0
+	cmp dword [r9 + FatOrderWorkspace.reserved], 0
 	jne .done
-	mov ecx, [rsi + SectorOps.sector_bytes]
+	mov ecx, [r8 + SectorOps.sector_bytes]
 	cmp ecx, 512
 	jb .done
 	cmp ecx, F_MAX_SECTOR
 	ja .done
-	lea edx, [ecx-1]
+	lea edx, [rcx-1]
 	test ecx, edx
 	jnz .done
 	add ecx, sizeof.FatOrderSector
-	mov rax, [rbp + FatOrderWorkspace.bytes]
-	add rax, [rbp + FatOrderWorkspace.data]
+	mov rax, [r9 + FatOrderWorkspace.bytes]
+	add rax, [r9 + FatOrderWorkspace.data]
 	jc .argument
-	mov rax, [rbp + FatOrderWorkspace.bytes]
+	mov rax, [r9 + FatOrderWorkspace.bytes]
 	xor edx, edx
 	div rcx
 	test rax, rax
@@ -53,15 +54,15 @@ proc fat_order_init uses rbx rsi rdi rbp
 	ja .argument
 	mov r10d, eax
 	mov r11d, ecx
-	mov ecx, [rbp + FatOrderWorkspace.slots]
+	mov ecx, [r9 + FatOrderWorkspace.slots]
 	cmp ecx, 2
 	jb .argument
-	lea edx, [ecx-1]
+	lea edx, [rcx-1]
 	test ecx, edx
 	jnz .argument
 	mov eax, ecx
 	shl rax, 2
-	add rax, [rbp + FatOrderWorkspace.index]
+	add rax, [r9 + FatOrderWorkspace.index]
 	jc .argument
 	mov rdi, rbx
 	mov ecx, sizeof.FatOrder
@@ -69,13 +70,13 @@ proc fat_order_init uses rbx rsi rdi rbp
 	rep stosb
 	mov [rbx + FatOrder.capacity], r10d
 	mov [rbx + FatOrder.stride], r11d
-	mov eax, [rbp + FatOrderWorkspace.slots]
+	mov eax, [r9 + FatOrderWorkspace.slots]
 	mov [rbx + FatOrder.slots], eax
-	mov rax, [rbp + FatOrderWorkspace.data]
+	mov rax, [r9 + FatOrderWorkspace.data]
 	mov [rbx + FatOrder.data], rax
-	mov rax, [rbp + FatOrderWorkspace.index]
+	mov rax, [r9 + FatOrderWorkspace.index]
 	mov [rbx + FatOrder.index], rax
-	mov [rbx + FatOrder.backend], rsi
+	mov [rbx + FatOrder.backend], r8
 	mov [rbx + FatOrder.ops.base.context], rbx
 	lea rax, [f_order_read]
 	mov [rbx + FatOrder.ops.base.read], rax
@@ -89,9 +90,9 @@ proc fat_order_init uses rbx rsi rdi rbp
 	mov [rbx + FatOrder.ops.barrier], rax
 	mov dword [rbx + FatOrder.ops.revision], 1
 	mov dword [rbx + FatOrder.ops.base.reserved], sizeof.FatOrderedOps
-	mov rax, [rsi + SectorOps.sectors]
+	mov rax, [r8 + SectorOps.sectors]
 	mov [rbx + FatOrder.ops.base.sectors], rax
-	mov eax, [rsi + SectorOps.sector_bytes]
+	mov eax, [r8 + SectorOps.sector_bytes]
 	mov [rbx + FatOrder.ops.base.sector_bytes], eax
 	fastcall f_order_reset, rbx
 .done:
@@ -168,8 +169,8 @@ proc f_order_read uses rbx rsi rdi rbp
 .done:
 	ret
 .backend:
-	mov r9, [rbx + FatOrder.backend]
-	fastcall [r9 + SectorOps.read], [r9 + SectorOps.context], rdx, rbp
+	mov rax, [rbx + FatOrder.backend]
+	fastcall [rax + SectorOps.read], [rax + SectorOps.context], rdx, rbp
 	jmp .done
 endp
 
@@ -252,9 +253,10 @@ proc f_order_end
 	jz .rollback
 	mov dword [rcx + FatOrder.active], 0
 	mov dword [rcx + FatOrder.accepted], 1
-	ret
+	jmp .done
 .rollback:
 	fastcall f_order_reset, rcx
+.done:
 	ret
 endp
 
@@ -285,16 +287,15 @@ proc f_order_barrier
 endp
 
 section '.text$fat_order_discard' code readable executable comdat any align 16
-proc fat_order_discard uses rbx rsi
-	mov rbx, rcx
+proc fat_order_discard uses rsi
 	mov rsi, rdx
 	mov eax, F_ARGUMENT
-	cmp [rsi + FatIdentity.ops], rbx
+	cmp [rsi + FatIdentity.ops], rcx
 	jne .done
 	mov eax, F_BUSY
-	cmp dword [rbx + FatOrder.active], 0
+	cmp dword [rcx + FatOrder.active], 0
 	jne .done
-	fastcall f_order_reset, rbx
+	fastcall f_order_reset, rcx
 	fastcall fat_invalidate, rsi
 .done:
 	ret
@@ -318,8 +319,8 @@ proc f_order_load
 	mov [r10 + FatCommitReport.lba], rdx
 	mov r8, [rcx + FatCommitState.identity]
 	mov r8, [r8 + FatIdentity.fat]
-	mov r9, [rcx + FatCommitState.backend]
-	fastcall [r9 + SectorOps.read], [r9 + SectorOps.context], rdx, r8
+	mov rax, [rcx + FatCommitState.backend]
+	fastcall [rax + SectorOps.read], [rax + SectorOps.context], rdx, r8
 	ret
 endp
 
@@ -329,8 +330,8 @@ proc f_order_flush
 	mov dword [r10 + FatCommitReport.operation], FI_FLUSH
 	mov qword [r10 + FatCommitReport.lba], -1
 	inc qword [r10 + FatCommitReport.flushes]
-	mov r9, [rcx + FatCommitState.backend]
-	fastcall [r9 + SectorOps.flush], [r9 + SectorOps.context]
+	mov rax, [rcx + FatCommitState.backend]
+	fastcall [rax + SectorOps.flush], [rax + SectorOps.context]
 	ret
 endp
 
@@ -346,8 +347,8 @@ proc f_order_send uses rbx rsi rdi
 	mov dword [r10 + FatCommitReport.operation], FI_WRITE
 	mov [r10 + FatCommitReport.lba], rdx
 	inc qword [r10 + FatCommitReport.writes]
-	mov r9, [rbx + FatCommitState.backend]
-	fastcall [r9 + SectorOps.write], [r9 + SectorOps.context], rdx, r8
+	mov rax, [rbx + FatCommitState.backend]
+	fastcall [rax + SectorOps.write], [rax + SectorOps.context], rdx, r8
 	test eax, eax
 	jnz .done
 	cmp qword [rbx + FatCommitState.verify], 0
@@ -372,12 +373,12 @@ proc f_order_verify uses rbx rsi rdi rbp
 	mov [r10 + FatCommitReport.lba], rbp
 	mov rdi, [rbx + FatCommitState.identity]
 	mov rdi, [rdi + FatIdentity.scratch]
-	mov r9, [rbx + FatCommitState.backend]
-	fastcall [r9 + SectorOps.read], [r9 + SectorOps.context], rbp, rdi
+	mov rax, [rbx + FatCommitState.backend]
+	fastcall [rax + SectorOps.read], [rax + SectorOps.context], rbp, rdi
 	test eax, eax
 	jnz .done
-	mov r9, [rbx + FatCommitState.backend]
-	mov ecx, [r9 + SectorOps.sector_bytes]
+	mov rcx, [rbx + FatCommitState.backend]
+	mov ecx, [rcx + SectorOps.sector_bytes]
 	repe cmpsb
 	je .done
 	mov eax, F_VERIFY

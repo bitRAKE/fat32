@@ -402,47 +402,47 @@ endp
 
 ; RCX=id*, RDX=request*, R8=report*, R9D=data cluster. EAX=status, EDX=value
 ; only on success. Count attempted FAT accesses, even cached hits or I/O errors.
+; Only the report pointer is live across fat_get; other inputs die at dispatch.
 section '.text$f_check_owner_get' code readable executable comdat align 16
-proc f_check_owner_get uses rbx rsi rdi rbp
+proc f_check_owner_get uses rdi
     locals
         value dd ?
     endl
 body:
-    mov rbx, rcx
-    mov rsi, rdx
+    mov r10, rcx
     mov rdi, r8
-    mov ebp, r9d
-    mov [rdi + FatCheck.cluster], ebp
+    mov [rdi + FatCheck.cluster], r9d
     mov qword [rdi + FatCheck.sector], -1
     mov dword [rdi + FatCheck.observed], 0
     mov dword [rdi + FatCheck.expected], 0
     mov eax, [rdi + FatCheck.examined]
-    cmp eax, [rsi + FatOwnershipCheck.fat_budget]
+    cmp eax, [rdx + FatOwnershipCheck.fat_budget]
     jae .limit
-    mov eax, ebp
+    mov eax, r9d
     shl rax, 2
     xor edx, edx
-    mov ecx, [rbx + FatIdentity.sector_bytes]
+    mov ecx, [r10 + FatIdentity.sector_bytes]
     div rcx
-    mov edx, [rbx + FatIdentity.active_fat]
-    imul edx, [rbx + FatIdentity.fat_sectors]
-    add edx, [rbx + FatIdentity.fat_start]
+    mov edx, [r10 + FatIdentity.active_fat]
+    imul edx, [r10 + FatIdentity.fat_sectors]
+    add edx, [r10 + FatIdentity.fat_start]
     add rax, rdx
     mov [rdi + FatCheck.sector], rax
     inc dword [rdi + FatCheck.examined]
-    fastcall fat_get, rbx, ebp, addr value
+    fastcall fat_get, r10, r9d, addr value
     test eax, eax
     jnz .io
     mov edx, [value]
     mov [rdi + FatCheck.observed], edx
+.done:
     ret
 .limit:
     mov dword [rdi + FatCheck.issue], FC_BUDGET
     mov eax, F_LIMIT
-    ret
+    jmp .done
 .io:
     mov dword [rdi + FatCheck.issue], FC_IO
-    ret
+    jmp .done
 endp
 
 ; RCX=id*, RDX=request*, R8=report*, R9=FOwnerWalk*. Claim one complete chain.

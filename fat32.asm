@@ -163,6 +163,7 @@ public fat_remove
 ; identity*, entry* in-out, new UTF-16 component*
 public fat_rename
 
+include 'fat/disk.inc'
 include 'fat/volume.inc'
 include 'fat/directory.inc'
 include 'fat/file.inc'

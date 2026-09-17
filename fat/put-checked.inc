@@ -45,7 +45,7 @@ body:
 	cmp dword [rbx + FatIdentity.mirrored], 0
 	jne .copy
 	mov esi, dword [rbx + FatIdentity.active_fat]
-	lea ebp, [esi+1]
+	lea ebp, [rsi+1]
 .copy:
 	mov eax, esi
 	imul eax, [rbx + FatIdentity.fat_sectors]

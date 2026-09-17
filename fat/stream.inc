@@ -48,7 +48,7 @@ body:
 	cmp dword [count], 0
 	je .bind
 .map:
-	lea eax, [esi-2]
+	lea eax, [rsi-2]
 	cmp eax, [rbx + FatIdentity.cluster_count]
 	jae .bad
 	mov [r15+rdi*4], esi
@@ -100,9 +100,10 @@ proc f_stream_prepare
 	fastcall f_handle, rcx
 	test eax, eax
 	jnz .done
-	mov rax, [rcx + FatStream.version]
-	cmp rax, [r11 + FatObject.chain_version]
-	jne .stale
+	mov r9, qword [rcx + FatStream.version]
+	mov eax, F_STALE
+	cmp r9, [r11 + FatObject.chain_version]
+	jne .done
 	mov r10, [r10 + FatVolume.identity]
 	mov r9d, [r11 + FatRecord.size]
 	sub r9, [rdx + FatTransfer.offset]
@@ -116,10 +117,7 @@ proc f_stream_prepare
 .empty:
 	xor r9d, r9d
 	xor eax, eax
-	ret
-.stale:
-	mov eax, F_STALE
-	ret
+	jmp .done
 endp
 
 ; RCX=id*, RDX=stream*, R8=file offset. EAX=status, R10=LBA, R11D=sector offset.
@@ -162,9 +160,10 @@ proc fat_stream_sector uses rbx rsi rdi
 	fastcall f_handle, rcx
 	test eax, eax
 	jnz .done
-	mov rax, [rbx + FatStream.version]
-	cmp rax, [r11 + FatObject.chain_version]
-	jne .stale
+	mov r9, qword [rbx + FatStream.version]
+	mov eax, F_STALE
+	cmp r9, [r11 + FatObject.chain_version]
+	jne .done
 	mov r10, [r10 + FatVolume.identity]
 	mov eax, [r11 + FatRecord.size]
 	test eax, eax
@@ -182,9 +181,6 @@ proc fat_stream_sector uses rbx rsi rdi
 	mov [rdi], r10
 .done:
 	ret
-.stale:
-	mov eax, F_STALE
-	jmp .done
 .end:
 	mov eax, F_END
 	jmp .done
@@ -357,7 +353,7 @@ body:
 .done:
 	ret
 .status:
-	mov eax, edi
+	xchg eax, edi
 	jmp .done
 .io:
 	mov eax, F_IO

@@ -18,7 +18,8 @@ static PolicyTest *policy_fixture(unsigned bps,unsigned spc,int damaged,unsigned
     OK(fat_open(&p->root,U("BAD.BIN"),FH_READ|FH_WRITE,&p->bad));
     OK(fat_open(&p->root,U("GOOD.BIN"),FH_READ|FH_WRITE,&p->good));
     OK(fat_open(&p->root,U("THIRD.BIN"),FH_READ|FH_WRITE,&p->third));
-    OK(ABI(fat_policy_init,&p->policy,&p->volume,p->ledger,capacity));
+    /* Retaining the incoming count must still honor its uint32_t contract. */
+    OK(ABI(fat_policy_init,&p->policy,&p->volume,p->ledger,0xFFFFFFFF00000000ull|capacity));
     return p;
 }
 static void policy_destroy(PolicyTest *p) {

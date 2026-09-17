@@ -184,64 +184,62 @@ endp
 ; RCX=volume* zero on first use, RDX=mounted identity*, R8=pool*, R9D=count.
 ; Reinitialization retires handles via epoch. No active operation may exist.
 section '.text$fat_volume_init' code readable executable comdat any align 16
-proc fat_volume_init uses rbx rsi rdi rbp r13
-	mov rbx, rcx
-	mov rsi, rdx
-	mov rbp, r8
-	mov r13d, r9d
+proc fat_volume_init uses rdi
+	; No calls: retain inputs in volatile registers while RCX/RDI clear the pool.
+	mov r10, rcx
 	mov eax, F_BUSY
-	cmp dword [rbx + FatVolume.gate], 0
+	cmp dword [r10 + FatVolume.gate], 0
 	jne .done
-	cmp qword [rbx + FatVolume.identity], 0
+	cmp qword [r10 + FatVolume.identity], 0
 	je .identity
-	cmp qword [rbx + FatVolume.identity], rsi
+	cmp qword [r10 + FatVolume.identity], rdx
 	jne .done
 .identity:
 	mov eax, F_FORMAT
-	cmp dword [rsi + FatIdentity.magic], F_MAGIC
+	cmp dword [rdx + FatIdentity.magic], F_MAGIC
 	jne .done
 	mov eax, F_BUSY
-	cmp dword [rsi + FatIdentity.transaction], 0
+	cmp dword [rdx + FatIdentity.transaction], 0
 	jne .done
-	cmp qword [rsi + FatIdentity.shared], 0
+	cmp qword [rdx + FatIdentity.shared], 0
 	je .owner
-	cmp qword [rsi + FatIdentity.shared], rbx
+	cmp qword [rdx + FatIdentity.shared], r10
 	jne .done
 .owner:
 	mov eax, F_ARGUMENT
-	test r13d, r13d
+	test r9d, r9d
 	jz .done
 	mov eax, F_RANGE
-	cmp qword [rbx + FatVolume.epoch], -1
+	cmp qword [r10 + FatVolume.epoch], -1
 	je .done
-	mov rcx, r13
+	mov ecx, r9d
 	shl rcx, 7
-	mov rax, rbp
+	mov rax, r8
 	add rax, rcx
 	jc .range
-	mov rdi, rbp
+	mov rdi, r8
 	xor eax, eax
 	rep stosb
-	mov qword [rbx + FatVolume.identity], rsi
-	mov qword [rsi + FatIdentity.shared], rbx
-	mov qword [rbx + FatVolume.objects], rbp
-	mov dword [rbx + FatVolume.capacity], r13d
-	mov rax, qword [rsi + FatIdentity.generation]
-	mov qword [rbx + FatVolume.generation], rax
-	mov qword [rbp + FatRecord.generation], rax
-	inc qword [rbx + FatVolume.epoch]
-	mov qword [rbx + FatVolume.next_id], 1
-	mov qword [rbp + FatRecord.sector], -1
-	mov eax, dword [rsi + FatIdentity.root_cluster]
-	mov dword [rbp + FatRecord.cluster], eax
-	mov dword [rbp + FatRecord.parent], eax
-	mov byte [rbp + FatRecord.raw+11], 10h
-	mov qword [rbp + FatObject.incarnation], 1
-	mov qword [rbp + FatObject.file_version], 1
-	mov qword [rbp + FatObject.chain_version], 1
-	mov qword [rbp + FatObject.directory_version], 1
-	mov dword [rbp + FatObject.live], 1
-	mov dword [rbp + FatObject.references], 1 ; root pin
+	mov qword [r10 + FatVolume.identity], rdx
+	mov qword [rdx + FatIdentity.shared], r10
+	mov qword [r10 + FatVolume.objects], r8
+	mov dword [r10 + FatVolume.capacity], r9d
+	mov rax, qword [rdx + FatIdentity.generation]
+	mov qword [r10 + FatVolume.generation], rax
+	mov qword [r8 + FatRecord.generation], rax
+	inc qword [r10 + FatVolume.epoch]
+	mov qword [r10 + FatVolume.next_id], 1
+	mov qword [r8 + FatRecord.sector], -1
+	mov eax, dword [rdx + FatIdentity.root_cluster]
+	mov dword [r8 + FatRecord.cluster], eax
+	mov dword [r8 + FatRecord.parent], eax
+	mov byte [r8 + FatRecord.raw+11], 10h
+	mov qword [r8 + FatObject.incarnation], 1
+	mov qword [r8 + FatObject.file_version], 1
+	mov qword [r8 + FatObject.chain_version], 1
+	mov qword [r8 + FatObject.directory_version], 1
+	mov dword [r8 + FatObject.live], 1
+	mov dword [r8 + FatObject.references], 1 ; root pin
 	xor eax, eax
 .done:
 	ret
@@ -264,15 +262,12 @@ proc fat_root
 	jne .done
 	cmp dword [r10 + FatIdentity.magic], F_MAGIC
 	jne .done
-	mov rax, qword [r10 + FatIdentity.generation]
-	cmp rax, [rcx + FatVolume.generation]
-	jne .stale
+	mov rdx, qword [r10 + FatIdentity.generation]
+	cmp rdx, [rcx + FatVolume.generation]
+	jne .done
 	fastcall f_bind_handle, rcx, [rcx + FatVolume.objects], r8, r9d
 .done:
 	ret
-.stale:
-	mov eax, F_STALE
-	jmp .done
 endp
 
 ; RCX=volume*. Detach only when no handles, iterators or parent pins remain.
@@ -287,8 +282,8 @@ proc fat_volume_close
 	jz .stale
 	cmp qword [r10 + FatIdentity.shared], rcx
 	jne .stale
-	mov rax, qword [rcx + FatVolume.generation]
-	cmp rax, [r10 + FatIdentity.generation]
+	mov rdx, qword [rcx + FatVolume.generation]
+	cmp rdx, [r10 + FatIdentity.generation]
 	jne .stale
 	mov eax, F_BUSY
 	cmp dword [rcx + FatVolume.gate], 0
@@ -303,7 +298,6 @@ proc fat_volume_close
 	ret
 .stale:
 	mov qword [rcx + FatVolume.identity], 0
-	mov eax, F_STALE
 	jmp .done
 endp
 
@@ -711,17 +705,15 @@ proc fat_iter_next
 	fastcall f_handle, rcx
 	test eax, eax
 	jnz .done
-	mov rax, qword [rcx + FatIterator.version]
-	cmp rax, [r11 + FatObject.directory_version]
-	jne .stale
+	mov r9, qword [rcx + FatIterator.version]
+	mov eax, F_STALE
+	cmp r9, [r11 + FatObject.directory_version]
+	jne .done
 	mov r9, rcx
 	mov r8, rdx
 	fastcall fat_dir_next, [r10 + FatVolume.identity], addr r9 + FatIterator.cursor, r8
 .done:
 	ret
-.stale:
-	mov eax, F_STALE
-	jmp .done
 endp
 
 section '.text$fat_iter_close' code readable executable comdat any align 16

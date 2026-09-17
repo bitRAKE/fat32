@@ -447,7 +447,9 @@ static void test_abi(void) {
     OK(ABI(fat_set_info,&f->id,&e,&stamp,0));
     OK(ABI(fat_rename,&f->id,&e,U("ABI renamed Ω.bin"),0));
     OK(ABI(fat_lookup,&f->id,2,U("ABI renamed Ω.bin"),&found));
-    OK(ABI(fat_dir_open,&f->id,2,&cursor,0)); OK(ABI(fat_dir_next,&f->id,&cursor,&found,0));
+    OK(ABI(fat_dir_open,&f->id,0xFFFFFFFF00000002ull,&cursor,0));
+    CHECK(cursor.generation==f->id.generation && cursor.cluster==2 && cursor.parent==2);
+    OK(ABI(fat_dir_next,&f->id,&cursor,&found,0));
     CHECK(ABI(fat_dir_next,&f->id,&cursor,&found,0)==F_END);
     OK(ABI(fat_get,&f->id,e.cluster,&value,0));
     OK(ABI(fat_chain,&f->id,e.cluster,chain,0)); CHECK(chain[0]==3);

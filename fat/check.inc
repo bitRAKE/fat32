@@ -61,7 +61,7 @@ body:
 .loop:
 	mov [rsi + FatCheck.cluster], edi
 	mov qword [rsi + FatCheck.sector], -1
-	lea eax, [edi-2]
+	lea eax, [rdi-2]
 	cmp eax, [rbx + FatIdentity.cluster_count]
 	jae .link
 	mov eax, [rsi + FatCheck.examined]
@@ -89,7 +89,7 @@ body:
 	mov [rsi + FatCheck.observed], eax
 	cmp eax, F_EOC
 	jae .end
-	lea ecx, [eax-2]
+	lea ecx, [rax-2]
 	cmp ecx, [rbx + FatIdentity.cluster_count]
 	jae .link
 	inc ebp
@@ -179,7 +179,7 @@ proc fat_check_file uses rbx rsi rdi rbp r13
 	mov ebx, eax
 	fastcall f_check_clear, rsi
 	mov dword [rsi + FatCheck.scope], FC_FILE
-	mov eax, ebx
+	xchg eax, ebx
 	jmp .done
 endp
 

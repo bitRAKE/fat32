@@ -157,7 +157,7 @@ body:
     jb .character
     test r14d, r14d
     jz .length
-    lea edx, [r14d-1]
+    lea edx, [r14-1]
 .length:
     test edx, edx
     jz .lfn_bad
@@ -289,7 +289,7 @@ body:
     mov ebx, eax
     fastcall f_check_clear, rsi
     mov dword [rsi + FatCheck.scope], FC_DIRECTORY
-    mov eax, ebx
+    xchg eax, ebx
     jmp .done
 .read_error:
     cmp eax, F_CORRUPT

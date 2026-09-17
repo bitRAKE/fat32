@@ -269,7 +269,7 @@ body:
 	mov dword [entry.name_length], r15d
 	mov rsi, qword [r13 + FatCreate.name]
 	lea rdi, [entry.name]
-	lea ecx, [r15d+1]
+	lea ecx, [r15+1]
 	rep movsw
 	mov byte [entry.raw+11], 20h
 	cmp dword [r13 + FatCreate.directory], 0
@@ -281,7 +281,7 @@ body:
 	jnz .done
 	fastcall f_checksum, addr entry.raw
 	mov dword [checksum], eax
-	lea eax, [r15d+12]
+	lea eax, [r15+12]
 	xor edx, edx
 	mov ecx, 13
 	div ecx
@@ -416,7 +416,7 @@ body:
 	mov eax, dword [checksum]
 	mov byte [rdi+13], al
 	mov word [rdi+26], 0
-	lea eax, [esi-1]
+	lea eax, [rsi-1]
 	imul eax, 13
 	xor ecx, ecx
 	lea r9, [f_lfn_offsets]

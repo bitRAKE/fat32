@@ -11,7 +11,8 @@ static void test_shared(unsigned bytes,unsigned spc) {
     uint64_t generation=f->id.generation,chain_version,file_version,reads; unsigned i;
     report("shared canonical objects / independent positions / scoped publication / rename / slot reuse");
     CHECK(in && out); for(i=0;i<size;i++) in[i]=(unsigned char)(i*29+(i>>8)+37);
-    OK(ABI(fat_volume_init,&v,&f->id,pool,8)); OK(ABI(fat_root,&v,3,&root,0));
+    /* A uint32_t argument does not promise zeroes in its register's high half. */
+    OK(ABI(fat_volume_init,&v,&f->id,pool,0xFFFFFFFF00000008ull)); OK(ABI(fat_root,&v,3,&root,0));
     shared_new(&root,U("A.bin"),0,&a); shared_new(&root,U("B.bin"),0,&b);
     OK(ABI(fat_open,&root,U("a.BIN"),3,&a2)); CHECK(a.object==a2.object && a.object!=b.object);
     CHECK(f->id.generation==generation);

@@ -96,7 +96,7 @@ body:
 .done:
 	ret
 .status:
-	mov eax, edi
+	xchg eax, edi
 	jmp .done
 .io:
 	mov eax, F_IO

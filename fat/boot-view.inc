@@ -5,9 +5,9 @@ proc f_boot_read
     mov eax, F_RANGE
     test rdx, rdx
     jnz .done
-    mov r9, [rcx]
+    mov rax, [rcx]
     mov rdx, [rcx+8]
-    fastcall [r9 + SectorOps.read], [r9 + SectorOps.context], rdx, r8
+    fastcall [rax + SectorOps.read], [rax + SectorOps.context], rdx, r8
 .done:
     ret
 endp

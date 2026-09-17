@@ -37,38 +37,36 @@ endp
 ; Zeroed/closed output, current shared volume, FatCheck[capacity], capacity.
 ; Report storage is not cleared and no object is pinned until diagnosed bad.
 section '.text$fat_policy_init' code readable executable comdat any align 16
-proc fat_policy_init uses rbx rsi rdi r12 rbp
+proc fat_policy_init uses rbx rdi
+    ; This leaf needs no saved copies of the volume, report array or capacity.
     mov rbx, rcx
-    mov rsi, rdx
-    mov r12, r8
-    mov ebp, r9d
     mov eax, F_BUSY
     cmp qword [rbx + FatPolicy.volume], 0
     jne .done
     cmp dword [rbx + FatPolicy.active], 0
     jne .done
     mov eax, F_ARGUMENT
-    test ebp, ebp
+    test r9d, r9d
     jz .storage
-    test r12, r12
+    test r8, r8
     jz .done
-    mov ecx, ebp
+    mov ecx, r9d
     imul rcx, sizeof.FatCheck
-    add rcx, r12
+    add rcx, r8
     jc .done
 .storage:
     mov eax, F_STALE
-    mov r10, [rsi + FatVolume.identity]
+    mov r10, [rdx + FatVolume.identity]
     test r10, r10
     jz .done
     cmp dword [r10 + FatIdentity.magic], F_MAGIC
     jne .done
-    cmp [r10 + FatIdentity.shared], rsi
+    cmp [r10 + FatIdentity.shared], rdx
     jne .done
     mov r11, [r10 + FatIdentity.generation]
-    cmp r11, [rsi + FatVolume.generation]
+    cmp r11, [rdx + FatVolume.generation]
     jne .done
-    cmp qword [rsi + FatVolume.epoch], 0
+    cmp qword [rdx + FatVolume.epoch], 0
     je .done
     mov eax, F_BUSY
     cmp dword [r10 + FatIdentity.transaction], 0
@@ -77,13 +75,13 @@ proc fat_policy_init uses rbx rsi rdi r12 rbp
     mov ecx, sizeof.FatPolicy/8
     xor eax, eax
     rep stosq
-    mov [rbx + FatPolicy.volume], rsi
+    mov [rbx + FatPolicy.volume], rdx
     mov [rbx + FatPolicy.identity], r10
     mov [rbx + FatPolicy.generation], r11
-    mov rdx, [rsi + FatVolume.epoch]
+    mov rdx, [rdx + FatVolume.epoch]
     mov [rbx + FatPolicy.epoch], rdx
-    mov [rbx + FatPolicy.reports], r12
-    mov [rbx + FatPolicy.capacity], ebp
+    mov [rbx + FatPolicy.reports], r8
+    mov [rbx + FatPolicy.capacity], r9d
     mov qword [rbx + FatPolicy.cause.sector], -1
 .done:
     ret
@@ -245,7 +243,7 @@ proc fat_policy_call uses rbx rsi rdi rbp r13 r14
     mov eax, F_BUSY
     cmp dword [rbx + FatPolicy.active], 0
     jne .done
-    fastcall f_policy_current, rbx
+    fastcall f_policy_current, rcx
     test eax, eax
     jnz .done
     mov eax, F_ARGUMENT
@@ -254,7 +252,7 @@ proc fat_policy_call uses rbx rsi rdi rbp r13 r14
     cmp qword [rsi + FatPolicyCall.action.target], 0
     je .done
     mov edi, [rsi + FatPolicyCall.kind]
-    lea ecx, [edi-1]
+    lea ecx, [rdi-1]
     cmp ecx, 2
     ja .done
     mov rbp, [rsi + FatPolicyCall.diagnosis]
@@ -369,7 +367,7 @@ proc fat_policy_call uses rbx rsi rdi rbp r13 r14
     or dword [rbx + FatPolicy.flags], FP_NO_READ
 .return:
     mov dword [rbx + FatPolicy.active], 0
-    mov eax, r14d
+    xchg eax, r14d
 .done:
     ret
 endp

@@ -10,6 +10,7 @@ for that boundary and [SHARED.md](SHARED.md) for the normal handle interface.
 | --- | --- |
 | `fat32.asm` | Complete export reference and implementation includes |
 | Root `.inc` files and `fat32.h` | Assembly and C interfaces, layouts, and ownership |
+| `fat/disk.inc` | Private on-disk layouts and format signatures |
 | `fat/volume.inc`, `directory.inc`, `file.inc`, `create.inc` | Geometry, FAT, namespace, data, and mutation algorithms |
 | `fat/shared.inc`, `snapshot.inc` | Shared handles and snapshot compatibility |
 | `fat/check*.inc`, `view.inc`, `boot-view.inc`, `salvage.inc` | Optional diagnostics and recovery views |
@@ -23,6 +24,10 @@ executables belong to [tests](../tests/README.md); integration samples belong to
 particular harness or device.
 
 ## Register and procedure policy
+
+The [x86-64 coding policy](x86-64_coding_policy.md) explains the rules below
+through source changes, emitted encodings, PROC/ENDP expansion, and repository
+measurements. It also covers value lifetimes and memory changes across calls.
 
 The static-RSP `PROC`/`ENDP` configuration leaves RBP available as an ordinary
 nonvolatile register. Prefer RBP/EBP for a live pointer or a non-64-bit integer

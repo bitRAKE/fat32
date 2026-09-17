@@ -31,7 +31,8 @@ static void test_view(void) {
         for(unsigned i=0;i<2;++i) {
             memset(scratch[i],0xa5,sizeof(scratch[i]));
             work[i]=(FatWorkspace){scratch[i]+16,3*bps,0};
-            OK(ABI(fat_view_open,&view[i],&f->id,i,&work[i]));
+            /* Copy selection consumes R8D; preserve no assumption about R8[63:32]. */
+            OK(ABI(fat_view_open,&view[i],&f->id,0xFFFFFFFF00000000ull|i,&work[i]));
             CHECK(view[i].identity.active_fat==i && !view[i].identity.mirrored);
             CHECK(view[i].identity.ops==&view[i].provider && !view[i].identity.shared);
             CHECK(!view[i].provider.write && !view[i].provider.begin && !view[i].provider.end && !view[i].provider.flush);

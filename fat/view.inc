@@ -2,11 +2,10 @@
 ; No I/O. All storage is disjoint; caller holds the source lease until close.
 ; RCX=zeroed/closed FatView*, RDX=source identity*, R8D=FAT copy, R9=workspace*.
 section '.text$fat_view_open' code readable executable comdat any align 16
-proc fat_view_open uses rbx rsi rdi r12 rbp
+proc fat_view_open uses rbx rsi rdi
+    ; R8D/R9 retain copy/workspace through REP; the final call consumes neither.
     mov rbx, rcx
     mov rsi, rdx
-    mov r12d, r8d
-    mov rbp, r9
     mov eax, F_BUSY
     cmp dword [rbx + FatIdentity.magic], 0
     jne .done
@@ -16,25 +15,25 @@ proc fat_view_open uses rbx rsi rdi r12 rbp
     cmp dword [rsi + FatIdentity.magic], F_MAGIC
     jne .done
     mov eax, F_RANGE
-    cmp r12d, [rsi + FatIdentity.fat_count]
+    cmp r8d, [rsi + FatIdentity.fat_count]
     jae .done
     mov eax, F_LIMIT
     mov r10, [rbx + FatIdentity.generation]
     cmp r10, -2                 ; reserve a generation for close, never wrap
     jae .done
     mov eax, F_ARGUMENT
-    cmp dword [rbp + FatWorkspace.reserved], 0
+    cmp dword [r9 + FatWorkspace.reserved], 0
     jne .done
-    mov rdi, [rbp + FatWorkspace.data]
+    mov rdi, [r9 + FatWorkspace.data]
     test rdi, rdi
     jz .done
-    mov edx, [rbp + FatWorkspace.bytes]
+    mov edx, [r9 + FatWorkspace.bytes]
     add rdx, rdi
     jc .done
     mov eax, [rsi + FatIdentity.sector_bytes]
-    lea edx, [eax+eax*2]
+    lea edx, [rax+rax*2]
     mov eax, F_MEMORY
-    cmp [rbp + FatWorkspace.bytes], edx
+    cmp [r9 + FatWorkspace.bytes], edx
     jb .done
     ; Copy geometry only as an implementation convenience; all mutable state,
     ; caches and provider capabilities below are independent of the source.
@@ -44,7 +43,7 @@ proc fat_view_open uses rbx rsi rdi r12 rbp
     mov [rbx + FatIdentity.generation], r10
     mov dword [rbx + FatIdentity.transaction], 0
     mov dword [rbx + FatIdentity.completions], 0
-    mov [rbx + FatIdentity.active_fat], r12d
+    mov [rbx + FatIdentity.active_fat], r8d
     mov dword [rbx + FatIdentity.mirrored], 0
     mov rsi, [rbx + FatIdentity.ops]
     lea rdi, [rbx + FatView.provider]
@@ -57,7 +56,7 @@ proc fat_view_open uses rbx rsi rdi r12 rbp
     mov [rbx + FatView.provider.end], rax
     mov [rbx + FatView.provider.flush], rax
     mov [rbx + FatView.provider.reserved], eax
-    mov rdi, [rbp + FatWorkspace.data]
+    mov rdi, [r9 + FatWorkspace.data]
     mov eax, [rbx + FatIdentity.sector_bytes]
     mov [rbx + FatIdentity.fat], rdi
     add rdi, rax

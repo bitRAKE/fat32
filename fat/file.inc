@@ -188,7 +188,7 @@ body:
 	cmp edi, [rbx + FatIdentity.cluster_count]
 	jae .bad
 .loop:
-	lea eax, [esi-2]
+	lea eax, [rsi-2]
 	cmp eax, [rbx + FatIdentity.cluster_count]
 	jae .bad
 	test edi, edi
@@ -538,7 +538,7 @@ body:
 	mov dword [shrinking], 1
 	test r13d, r13d
 	jz .all
-	lea r8d, [r13d-1]
+	lea r8d, [r13-1]
 	fastcall f_nth, rbx, [rsi + FatEntry.cluster], r8d, addr new_cluster
 	test eax, eax
 	jnz .done

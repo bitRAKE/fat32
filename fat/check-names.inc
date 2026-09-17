@@ -13,7 +13,7 @@ body:
     mov r13, rcx
     mov rbp, rdx
     mov rsi, r8
-    fastcall f_check_clear, rsi
+    fastcall f_check_clear, r8
     mov dword [rsi + FatCheck.scope], FC_NAMES
     mov eax, F_ARGUMENT
     cmp dword [rbp + FatNameCheck.reserved], 0
