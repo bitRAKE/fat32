@@ -7,19 +7,12 @@ struct FOwnerWalk
 ends
 
 section '.text$fat_check_ownership' code readable executable comdat any align 16
-proc fat_check_ownership uses rbx rsi rdi r12 rbp r15
+proc fat_check_ownership uses rbx rsi rdi r12 rbp r15, task_index:4, cluster:4, sector_in:4, offset:4, index:4, kind:4, label_seen:4, orphan_first:4
     locals
         walk FOwnerWalk
-        task_index dd ?
-        cluster dd ?
-        sector_in dd ?
-        offset dd ?
-        index dd ?
-        kind dd ?
-        label_seen dd ?
-        orphan_first dd ?
         orphan_sector dq ?
     endl
+    assert orphan_first+4-(parmbase@proc) <= 32
 body:
     mov rbx, rcx
     mov rsi, rdx
@@ -404,10 +397,8 @@ endp
 ; only on success. Count attempted FAT accesses, even cached hits or I/O errors.
 ; Only the report pointer is live across fat_get; other inputs die at dispatch.
 section '.text$f_check_owner_get' code readable executable comdat align 16
-proc f_check_owner_get uses rdi
-    locals
-        value dd ?
-    endl
+proc f_check_owner_get uses rdi, value:4
+    assert value+4-(parmbase@proc) <= 32
 body:
     mov r10, rcx
     mov rdi, r8

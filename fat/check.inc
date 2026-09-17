@@ -39,10 +39,8 @@ endp
 ; RCX=id*, EDX=cluster, R8D=link budget, R9=report*. Brent's bounded check is
 ; separate from fat_chain (the tail/count primitive used by actual mutations).
 section '.text$fat_check_chain' code readable executable comdat any align 16
-proc fat_check_chain uses rbx rsi rdi r12 r13 rbp r15
-	locals
-		next dd ?
-	endl
+proc fat_check_chain uses rbx rsi rdi r12 r13 rbp r15, next:4
+	assert next+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rsi, r9
@@ -242,10 +240,8 @@ endp
 ; RCX=id*, RDX=report*. FAT[0] media/reserved bits and FAT[1] status. Reads
 ; primary BPB and selected FAT afresh through provider, not bypassing its cache.
 section '.text$fat_check_reserved' code readable executable comdat any align 16
-proc fat_check_reserved uses rbx rsi rdi
-	locals
-		value dd ?
-	endl
+proc fat_check_reserved uses rbx rsi rdi, value:4
+	assert value+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rsi, rdx
@@ -388,13 +384,8 @@ endp
 ; preserved high nibbles and unaddressable FAT padding are not consistency data.
 ; At most one active-sector read + (fat_count-1) other reads per range sector.
 section '.text$fat_check_mirrors' code readable executable comdat any align 16
-proc fat_check_mirrors uses rbx rsi rdi rbp r13 r14 r15
-	locals
-		part dq ?
-		offset dd ?
-		entries dd ?
-		value dd ?
-	endl
+proc fat_check_mirrors uses rbx rsi rdi rbp r13 r14 r15, part:8, offset:4, entries:4, value:4
+	assert value+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rsi, r8

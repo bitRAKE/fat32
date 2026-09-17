@@ -1,11 +1,10 @@
 ; Optional range callback over the order provider's logical view. A suspended
 ; backend range must retain the same owner lease as ordinary reads/commit.
 section '.text$fat_order_read_range' code readable executable comdat any align 16
-proc fat_order_read_range uses rbx rsi rdi rbp r13 r14 r15
-	locals
-		request FatRangeRequest
-		first dq ?
-	endl
+proc fat_order_read_range uses rbx rsi rdi rbp r13 r14 r15, first:8
+	assert first+8-(parmbase@proc) <= 32
+	home_struct request, FatRangeRequest, 8
+	assert first+8 <= request
 body:
 	mov rbx, [rcx + FatOrderRange.order]
 	mov r13, [rcx + FatOrderRange.backend]

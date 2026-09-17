@@ -8,9 +8,12 @@ that object as `fat32.lib` adds no runtime dependency.
 
 Use fasmg with the fasm2 includes supporting `MS64 NEWCOFF`, COMDAT ANY and
 NODUPLICATES sections, associative unwind/CodeView contributions, and the
-`newcoff_debug_procs` / static-RSP procedure macros. `common/policy.g` selects this
-policy. An older include set without these capabilities is not a compatible
-toolchain; the linker feature tests check the emitted object contract.
+`newcoff_debug_procs` / static-RSP procedure macros. Typed PROC names must
+reserve their declared byte width (`:4` advances four bytes), permitting packed
+incoming-home storage. `common/policy.g` selects this policy and supplies bounded
+`home_struct` records and scalar DWORD debug types. An older include set without
+these capabilities is not a compatible toolchain; the linker feature tests check
+the emitted object contract.
 
 The root makefile uses NMAKE and the Microsoft COFF librarian. From the repository
 root in an x64 developer prompt:

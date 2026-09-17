@@ -508,9 +508,7 @@ endp
 ; including a read prefix on error. Reuse the same explicit-offset primitive.
 section '.text$fat_read_next' code readable executable comdat any align 16
 proc fat_read_next uses rbx rsi
-	locals
-		request FatTransfer
-	endl
+	home_struct request, FatTransfer, 0
 body:
 	mov rbx, rcx
 	mov rsi, rdx
@@ -529,9 +527,7 @@ endp
 
 section '.text$fat_write_next' code readable executable comdat any align 16
 proc fat_write_next uses rbx rsi
-	locals
-		request FatTransfer
-	endl
+	home_struct request, FatTransfer, 0
 body:
 	mov rbx, rcx
 	mov rsi, rdx

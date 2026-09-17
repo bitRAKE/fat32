@@ -6,11 +6,8 @@
 ; disagreement. Any partial staging is rolled back by the caller's f_finish.
 ; Every exit invalidates fat_lba because the cache payload may hold another copy.
 section '.text$fat_put_checked' code readable executable comdat any align 16
-proc fat_put_checked uses rbx rsi rdi r12 rbp
-	locals
-		old_value dd ?
-		cluster_id dd ?
-	endl
+proc fat_put_checked uses rbx rsi rdi r12 rbp, old_value:4, cluster_id:4
+	assert cluster_id+4-(parmbase@proc) <= 32
 
 	mov rbx, rcx
 	mov eax, F_CORRUPT

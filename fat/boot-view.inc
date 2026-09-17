@@ -15,13 +15,12 @@ endp
 ; RCX=zeroed/closed FatView*, RDX=source SectorOps*, R8=FatBootSource*,
 ; R9=separate three-sector workspace. Failed candidates leave output unchanged.
 section '.text$fat_view_boot' code readable executable comdat any align 16
-proc fat_view_boot uses rbx rsi rdi r12 rbp r14
+proc fat_view_boot uses rbx rsi rdi r12 rbp r14, mapping:8, boot_lba:8
     locals
         candidate FatIdentity
         bootstrap SectorOps
-        mapping dq ?
-        boot_lba dq ?
     endl
+    assert boot_lba+8-(parmbase@proc) <= 32
 body:
     mov rbx, rcx
     mov r12, rdx

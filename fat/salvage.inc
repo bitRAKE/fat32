@@ -175,14 +175,8 @@ endp
 ; F_END with a completed prefix distinguishes a request crossing available.
 ; Plans/extents are immutable under the same stable lease from plan through use.
 section '.text$fat_salvage_read' code readable executable comdat any align 16
-proc fat_salvage_read uses rbx rsi rdi rbp r13 r14 r15
-    locals
-        position dq ?
-        left dd ?
-        take dd ?
-        in_sector dd ?
-        result dd ?
-    endl
+proc fat_salvage_read uses rbx rsi rdi rbp r13 r14 r15, position:8, left:4, take:4, in_sector:4, result:4
+    assert result+4-(parmbase@proc) <= 32
 body:
     mov rbp, rcx
     mov r13, rdx

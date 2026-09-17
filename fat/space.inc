@@ -2,10 +2,8 @@
 ; No FSInfo trust, stored exact-count cache, mutation or implicit verification.
 ; RCX=identity*, RDX=uint32_t* out. Output is unchanged on any failure.
 section '.text$fat_count_free' code readable executable comdat any align 16
-proc fat_count_free uses rbx rsi rdi rbp r13
-	locals
-		value dd ?
-	endl
+proc fat_count_free uses rbx rsi rdi rbp r13, value:4
+	assert value+4-(parmbase@proc) <= 32
 body:
 	mov eax, F_FORMAT
 	cmp dword [rcx + FatIdentity.magic], F_MAGIC

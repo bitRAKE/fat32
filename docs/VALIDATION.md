@@ -17,7 +17,7 @@ FAT32 extents without allocating an entire volume.
 | Files and directories | Reads, overwrite, zero-filled extension, truncation, metadata, same-parent rename, deletion, empty directories, LFN lengths and damage, alias fallback, and 4 GiB limits |
 | Allocation and mutation | Fragmented/backward chains, high-nibble preservation, active FATs, unsigned LBA strides across 1..255 FAT copies, exhaustion, every staging failure, and preservation of the previous overlay on rollback |
 | Shared ownership | Canonical same-file objects, independent positions, affected-file versions, iterators, parent pins, pool/reference limits, and stale mounts |
-| ABI and workspace | All eight nonvolatile GPRs, callback alignment, volatile-register poisoning, nonzero upper halves of narrow register arguments, exact three-sector workspaces, canaries, and failure before I/O on invalid storage |
+| ABI and workspace | All eight nonvolatile GPRs, callback alignment, volatile-register and home-space poisoning, guarded home boundaries, packed DWORDs with a real fifth argument, nonzero upper halves of narrow register arguments, exact three-sector workspaces, canaries, and failure before I/O on invalid storage |
 | Concurrency | A competing thread while a provider/commit is suspended under the optional gate; busy callers preserve output/state |
 | Diagnostics | Bounded chains, logical directory/LFN structure, lookup-name collisions, allocation ownership, reserved status, BPB backups, FAT copies, and stale/incomplete evidence |
 | Recovery | Independent FAT views, explicit backup-BPB geometry, unique-prefix salvage, budgets, extent exhaustion, partial results, and source leases |
@@ -96,6 +96,22 @@ procedures pass the same object checks. The policy documents the argument-owner
 regression caught in the submitted adaptive-read edit and the scope of the new
 96-suite evidence.
 
+Incoming-home storage then reduces 28 procedure frames by **16 or 32 bytes**.
+The sum of declared frame footprints falls from **21,624 to 21,016 bytes**;
+this 608-byte static difference is not a measured call-stack peak. Procedure
+code increases from **26,748 to 26,836 bytes** because some relocated fields
+need longer address encodings. All **7,474 instructions** match the baseline
+sequence after accounting for named stack-field locations, frame sizes and
+branch destinations; load/store and call counts do not change. All 149 procedures
+pass the frame and object checks. The coding policy records the per-function
+tradeoffs and cases where alignment makes relocation unhelpful.
+
+The ABI suite now overwrites callback home areas, checks a guard immediately
+after each four-argument target's home area, and exercises eight packed DWORDs
+across a nested overwrite with a real fifth argument. `home-test` verifies their
+CodeView offsets and 32-bit types, plus three rejected record placements:
+negative offset, one-byte overrun, and a record larger than 32 bytes.
+
 The following linked `.text` sizes use the LLD release/archive profile with
 `/OPT:REF /OPT:NOICF`. They include the small probe and linker alignment; they
 are not the sum of selected procedure sizes and are not performance timings.
@@ -129,13 +145,13 @@ The tests enforce separate ceilings without relaxing them for this review.
 | `diagnostics` | 2,234 |
 | `directory-check` | 3,386 |
 | `name-check` | 5,114 |
-| `ownership-check` | 3,050 |
-| `ordered-write` | 11,226 |
-| `verified-write` | 11,338 |
+| `ownership-check` | 3,098 |
+| `ordered-write` | 11,242 |
+| `verified-write` | 11,354 |
 | `stream-read` | 4,442 |
 | `stream-map` | 4,282 |
-| `range-read` | 4,826 |
-| `ordered-range` | 12,682 |
+| `range-read` | 4,842 |
+| `ordered-range` | 12,714 |
 
 
 Per-function `.pdata`, `.xdata`, and CodeView contributions remain associated

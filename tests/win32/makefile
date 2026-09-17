@@ -53,8 +53,10 @@ test: $(HOST)\tests.exe
 examples: $(HOST)\fatdemo.exe example\uefi\reader.obj example\readonly\readonly.obj
 examples-test: $(HOST)\ueficheck.exe readonly-test
 	.\$(HOST)\ueficheck.exe
-feature-test: fat32.lib shadow-test
+feature-test: fat32.lib shadow-test home-test
 	py tests\win32\features.py --fasm-root "$(FASM2_ROOT)" $(feature_llvm) $(FEATURE_ARGS)
+home-test: fat32.obj $(HOST)\abi.obj
+	py tests\win32\home.py --fasm-root "$(FASM2_ROOT)" $(feature_llvm)
 shadow-test: fat32.lib
 	py tests\win32\shadow.py --fasm-root "$(FASM2_ROOT)" $(feature_llvm)
 readonly-test: fat32.lib example\readonly\readonly.obj

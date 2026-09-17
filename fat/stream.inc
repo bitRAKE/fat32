@@ -1,12 +1,7 @@
 ; Optional reusable maps. Base file operations never reference this module.
 section '.text$fat_stream_open' code readable executable comdat any align 16
-proc fat_stream_open uses rbx rsi rdi rbp r13 r15
-	locals
-		next dd ?
-		count dd ?
-		owner dq ?
-		object dq ?
-	endl
+proc fat_stream_open uses rbx rsi rdi rbp r13 r15, next:4, count:4, owner:8, object:8
+	assert object+8-(parmbase@proc) <= 32
 body:
 	mov rbp, rdx
 	mov r13, r8
@@ -247,10 +242,10 @@ section '.text$fat_stream_read_range' code readable executable comdat any align 
 proc fat_stream_read_range uses rbx rsi r12 r13 r14 rbp
 	locals
 		request FatRangeRequest
-		partial FatTransfer
-		wanted dd ?
 		position dq ?
+		wanted dd ?
 	endl
+	home_struct partial, FatTransfer, 0
 body:
 	mov r12, rcx
 	mov r13, rdx

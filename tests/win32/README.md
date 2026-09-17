@@ -28,13 +28,20 @@ override them in the environment or as NMAKE arguments. LLVM comes from
 | `all` | Library, host tools, and example objects |
 | `test` | Synthetic, transactional, ABI, and regular-file suites |
 | `examples-test` | UEFI host mock and read-only replacement controls |
-| `feature-test` | Ordinary consumer profiles and public replacement matrix |
+| `feature-test` | Ordinary consumer profiles, public replacement matrix, and home-layout checks |
+| `home-test` | Packed DWORD/fifth-argument debug records and rejected home layouts |
 | `verify` | Core/adapter unwind data, undefined symbols, and example imports |
 | `usbcheck.exe`, `repocheck.exe` | Build physical test tools; do not run them |
 
 Executables, host objects, PDBs, and `sector.lib` are written to `build/win32/`.
 `fat32.obj` / `fat32.lib` stay at the root; example objects stay beside their
 sources. Linker matrices write their separate reports under `build/`.
+
+The ABI suite overwrites each provider callback's incoming home space and
+volatile registers. Calls through `ABI` also guard storage above the target's
+32-byte home area. A dedicated probe uses all eight packed DWORDs across a nested
+call and checks a real fifth argument. `home-test` inspects their CodeView offsets
+and types and rejects three out-of-bounds `home_struct` layouts at assembly time.
 
 ## Physical interoperability
 

@@ -71,11 +71,8 @@ endp
 ; Check generation, parent/slot bounds, raw SFN and cluster/size agreement.
 ; R10 is a cache pointer used only after the final call, so needs no save.
 section '.text$f_validate' code readable executable comdat align 16
-proc f_validate uses rbx rsi
-	locals
-		location dq ?
-		offset dd ?
-	endl
+proc f_validate uses rbx rsi, location:8, offset:4
+	assert offset+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rsi, rdx
@@ -214,12 +211,8 @@ endp
 ; Separate from mutation transfers so read-only consumers do not retain writes.
 ; done counts the completed prefix even when a provider read fails.
 section '.text$f_read_bytes' code readable executable comdat align 16
-proc f_read_bytes uses rbx rsi rdi rbp r13
-	locals
-		cluster dd ?
-		inside dd ?
-		remaining dd ?
-	endl
+proc f_read_bytes uses rbx rsi rdi rbp r13, cluster:4, inside:4, remaining:4
+	assert remaining+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rbp, r8
@@ -296,15 +289,8 @@ endp
 ; Caller validates the full range/chain; modes 1/2 require an active transaction.
 ; Destroys scratch; performs partial-sector read/modify/write when editing.
 section '.text$f_write_bytes' code readable executable comdat align 16
-proc f_write_bytes uses rbx rsi rdi rbp r13
-	locals
-		cluster dd ?
-		inside dd ?
-		mode dd ?
-		span dd ?
-		lba dq ?
-		remaining dd ?
-	endl
+proc f_write_bytes uses rbx rsi rdi rbp r13, cluster:4, inside:4, mode:4, span:4, lba:8, remaining:4
+	assert remaining+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rbp, r8
@@ -393,9 +379,7 @@ endp
 ; Neither entry nor offset/length changes. See fat32.inc for buffer/alias rules.
 section '.text$f_read_record' code readable executable comdat align 16
 proc f_read_record uses rdi
-	locals
-		request FatTransfer
-	endl
+	home_struct request, FatTransfer, 0
 body:
 	mov rdi, r8
 	mov dword [r8 + FatTransfer.done], 0
@@ -453,16 +437,17 @@ endp
 ; zero exposed bytes and stage SFN; failure may alter work copy/staged sectors.
 ; Caller must roll back and never publish the work copy on failure.
 section '.text$f_resize' code readable executable comdat align 16
-proc f_resize uses rbx rsi rdi r12 r13 rbp
+proc f_resize uses rbx rsi rdi r12 r13 rbp, defer:4
 	locals
 		chain dq ?
 		new_cluster dd ?
 		tail dd ?
 		new_first dd ?
-		defer dd ?
 		shrinking dd ?
-		request FatTransfer
 	endl
+	assert defer+4-(parmbase@proc) <= 32
+	home_struct request, FatTransfer, 8
+	assert defer+4 <= request
 body:
 	mov rbx, rcx
 	mov rsi, rdx
@@ -641,8 +626,8 @@ section '.text$f_write_record' code readable executable comdat align 16
 proc f_write_record uses rbx rsi rdi r12 rbp r14
 	locals
 		entry FatRecord
-		request FatTransfer
 	endl
+	home_struct request, FatTransfer, 0
 body:
 	mov rbx, rcx
 	mov r12, rdx

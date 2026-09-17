@@ -419,14 +419,13 @@ endp
 
 ; RCX=order*, RDX=id*, R8=report*, R9=optional verification hook.
 section '.text$f_order_run' code readable executable comdat align 16
-proc f_order_run uses rbx rsi rdi rbp r13 r14 r15
+proc f_order_run uses rbx rsi rdi rbp r13 r14 r15, first:4, limit:4
 	locals
 		state FatCommitState
-		first dd ?
-		limit dd ?
 		mode dd ?
 		cursor dd ?
 	endl
+	assert limit+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rsi, rdx

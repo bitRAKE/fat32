@@ -224,19 +224,16 @@ endp
 ; fifth stack argument [ignore]=old SFN index+1 for rename, 0 for normal create.
 ; EAX=status. Requires active transaction; does not begin/end it. Output changes
 ; only on F_OK, but generation is provisional until wrapper accepts the operation.
-; First four formal names exist to place the fifth argument at its Win64 offset.
+; Packed PROC scratch occupies the incoming 32-byte home area. The fifth
+; argument remains at its Win64 offset; paired outputs keep their field layout.
 section '.text$f_create' code readable executable comdat align 16
-proc f_create uses rbx rsi rdi rbp r13 r14 r15, id_arg, parent_arg, request_arg, out_arg, ignore
+proc f_create uses rbx rsi rdi rbp r13 r14 r15, first:8, consumed_end:4, allocated:4, location:8, offset:4, checksum:4, ignore
 	locals
 		entry FatEntry
-		first dq ?
-		consumed_end dd ?
-		location dq ?
-		offset dd ?
-		allocated dd ?
-		checksum dd ?
 		chain dq ?
 	endl
+	assert checksum+4-(parmbase@proc) <= 32
+	assert ignore-(parmbase@proc) = 32
 body:
 	mov rbx, rcx
 	mov ebp, edx
@@ -502,13 +499,12 @@ endp
 ; records attached to the SFN, then mark that set deleted. Preserve the chain.
 ; Initial setup consumes RCX/RDX directly; saved RBX/RBP are for later calls.
 section '.text$f_erase' code readable executable comdat align 16
-proc f_erase uses rbx rsi rbp r13
+proc f_erase uses rbx rsi rbp r13, location:8, offset:4
 	locals
 		cursor FatCursor
 		entry FatEntry
-		location dq ?
-		offset dd ?
 	endl
+	assert offset+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rbp, rdx
@@ -554,8 +550,8 @@ section '.text$f_rename_record' code readable executable comdat align 16
 proc f_rename_record uses rbx rsi rdi rbp r13
 	locals
 		entry FatEntry
-		request FatCreate
 	endl
+	home_struct request, FatCreate, 0
 body:
 	mov rbx, rcx
 	mov rbp, rdx

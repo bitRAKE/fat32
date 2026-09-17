@@ -26,6 +26,7 @@ demands. Improving any of them can leave resources available for useful work.
 | Use an existing argument register; remove a redundant copy | Removes an instruction from the instruction stream and its processing requirements | Move elimination may already remove execution latency; do not count every deleted MOV as an ALU operation saved |
 | Reuse a loaded value; remove a redundant load | Removes address-generation and load work, queue demand, and a new load-to-use dependency | The retained value must have the required observation time and survive intervening operations |
 | Shorten a value's lifetime; remove an unnecessary `uses` entry | Avoids the generated stack store and restore load on each affected invocation, as well as their instruction-processing demand | Inspect the complete frame and every return; an architectural register count alone does not measure physical-register pressure |
+| Reuse incoming home space for private storage | Packs live stack state into a smaller address range, potentially touching fewer data-cache lines and reducing stack-access misses | Check complete frames, field alignment and address encodings; unchanged load/store counts can still benefit from better locality |
 | Keep eligible flag writers next to their branch | Allows fusion to reduce the internal operations competing for dispatch, issue, and retirement | Eligibility depends on the processor, operands, addressing, and combined instruction length |
 | Use shorter encodings and share epilogues | Reduces instruction footprint and can improve use of instruction-cache lines and fetch/decode windows | Byte savings alone do not establish fewer internal operations; shared exits can add a taken branch |
 
@@ -374,6 +375,73 @@ store register arguments into home slots. Use incoming registers or explicitly
 save them. Use named stack parameters for fifth and later arguments instead of
 hard-coded offsets that become wrong when the frame changes.
 
+### Use incoming home space for small private storage
+
+Every Win64 call provides four eight-byte home slots, even when it has fewer
+arguments. The callee owns these incoming 32 bytes and may repurpose them for
+private storage. They remain available across nested calls. The separate
+outgoing call area belongs to the next callee and cannot retain live values
+across that call. See Microsoft's [stack usage rules](https://learn.microsoft.com/en-us/cpp/build/stack-usage).
+
+The runtime aim is better data-cache locality. Packing live stack state into a
+smaller address range can touch fewer cache lines and reduce stack-access misses
+and interference with other data. Load/store instruction counts need not fall
+for this benefit. The effect depends on the active call path, layout and cache
+state; frame sizes alone do not measure cache misses.
+
+The installed PROC macros reserve the declared size for each typed name. Use
+that facility for packed scratch, while the ABI comments continue to identify
+the actual register arguments:
+
+```asm
+; RCX=identity*, RDX=const FatEntry*. Incoming homes hold f_slot's output.
+proc f_validate uses rbx rsi, location:8, offset:4
+    assert offset+4-(parmbase@proc) <= 32
+body:
+    ; ... f_slot initializes the contiguous {qword sector, dword offset} ...
+```
+
+The names do not initialize storage or save incoming registers. Every field
+must be written before it is read. Eight `:4` names can describe eight scratch
+DWORDs within the four ABI home slots; actual stack arguments still use their
+ABI positions. Preserve contiguous output layouts when reordering fields.
+Parenthesize `parmbase@proc` in subtractions: it expands to an address expression.
+
+For a small record, `home_struct` supplies its existing field names without
+contributing to the ordinary local allocation:
+
+```asm
+proc f_read_record uses rdi
+    home_struct request, FatTransfer, 0
+body:
+    ; ... initialize request.data, request.offset and request.length ...
+```
+
+Its final argument is a constant byte offset within incoming home space,
+defaulting to zero. The macro rejects a negative offset or a record extending
+past byte 32. Combine a record with packed scalar names only at disjoint offsets;
+`fat_order_read_range` places `first:8` at zero and its 24-byte request at eight.
+Keep the `body:` anchor after record declarations. These declarations generate
+no initialization instructions.
+
+`f_create` fills the first 32 bytes with private scalar storage and keeps its
+real fifth argument, `ignore`, immediately afterward. Its assertion fixes that
+argument at entry RSP+40 regardless of frame size. Declared scratch names are
+therefore storage aliases, not an argument-count declaration for callers.
+
+Measure the complete frame before adopting a relocation. Alignment can absorb
+small local blocks: `f_slot` retains its four-byte local because moving it would
+leave the same allocation. Moving only `first` and `limit` in `f_order_run`
+already removes 16 stack bytes; leaving `mode` and `cursor` local keeps their
+frequent accesses within short RSP displacements. Filling every home byte is
+not the objective. Longer displacements can increase code size even while
+stack consumption falls.
+
+The project policy corrects the debug wrapper's default qword type for labels
+whose declared size is four bytes. Packed DWORDs retain their real addresses
+and 32-bit CodeView types. The harness checks these records, eight packed fields,
+the real fifth argument, outgoing-home clobbers, and the home-area boundary.
+
 ### RET is an epilogue expansion
 
 Each operandless source `ret` emits the configured epilogue. A routine with
@@ -622,6 +690,46 @@ relocation and COMDAT checks. The **96-suite** run includes volatile callback
 poisoning and the new argument/geometry cases; linker and independent image
 checks are recorded in [VALIDATION.md](VALIDATION.md). No whole-library or
 processor-specific speedup has been measured.
+
+### Incoming-home storage after `033565e`
+
+Twenty-eight procedures move small scalars or records into incoming home space.
+Eighteen frames shrink by 16 bytes and ten by 32 bytes. Nine other scalar-only
+candidates retain their original locals because alignment would absorb the
+proposed saving. Large records remain in ordinary local storage.
+
+| Procedure | Previous stack bytes | Current stack bytes |
+| --- | ---: | ---: |
+| `f_validate` | 72 | 56 |
+| `f_read_record` | 72 | 40 |
+| `f_write_bytes` | 104 | 72 |
+| `f_create` | 728 | 696 |
+| `fat_check_ownership` | 136 | 104 |
+| `f_order_run` | 152 | 136 |
+| `fat_order_read_range` | 120 | 88 |
+
+These figures include register pushes and fixed allocation, excluding the
+return address and incoming area already provided by the caller. Summed across
+all procedures, declared footprints fall from **21,624 to 21,016 bytes**. The
+**608-byte** difference is static accounting, not a measured call-stack peak.
+Actual savings accumulate along the procedures active on a given call path.
+
+The tradeoff is **88 additional code bytes**, from **26,748 to 26,836**. Four
+procedures grow because of longer address and resulting branch encodings:
+`f_resize` by six bytes, `fat_check_ownership` by 49, `f_order_run` by 18, and
+`fat_stream_read_range` by 15. The other 24 relocated procedures retain their
+code sizes. Instruction count remains **7,474**, with identical instruction
+sequences after mapping each named stack field, frame allocation, and branch
+destination. Saves/restores, loads/stores, and call counts remain unchanged.
+The runtime rationale is lower stack cache pressure despite unchanged memory
+instruction counts. Cache-miss and timing differences have not been measured.
+
+All 149 procedures retain valid unwind, call alignment/home space, relocation
+targets and COMDAT associations. All 96 execution suites and 312 linker checks
+pass. The ABI probe now guards the caller's boundary and callbacks overwrite
+their incoming homes; packed DWORDs must also survive a nested overwrite while
+the real fifth argument remains intact. Metadata checks verify DWORD types and
+positions, and three negative assembly probes reject invalid record layouts.
 
 ## 8. Review procedure
 

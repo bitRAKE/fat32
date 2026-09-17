@@ -21,17 +21,18 @@ typedef struct Fixture {
     int fail_stage; uint64_t provider_reads; FatWorkspace workspace;
     unsigned char workspace_data[3*4096];
 } Fixture;
-/* ABI shims poison volatile GPRs after every filesystem-provider callback. */
+/* ABI shims poison home space and volatile GPRs after provider callbacks. */
 extern int abi_read(void *,uint64_t,void *);
 extern int abi_write(void *,uint64_t,const void *);
 extern int abi_begin(void *);
 extern void abi_end(void *,int);
 typedef struct AbiCall { uintptr_t target,args[4]; int result; } AbiCall;
 extern unsigned abi_probe(AbiCall *);
+extern int abi_home_probe(void);
 _Static_assert(offsetof(AbiCall,result)==40,"ABI probe result");
 static int checked_call(uintptr_t target,uintptr_t a,uintptr_t b,uintptr_t c,uintptr_t d) {
     AbiCall call={target,{a,b,c,d},-1}; unsigned mask=abi_probe(&call);
-    if(mask) { fprintf(stderr,"ABI nonvolatile corruption: mask=%02X\n",mask); ExitProcess(1); }
+    if(mask) { fprintf(stderr,"ABI register/home corruption: mask=%03X\n",mask); ExitProcess(1); }
     return call.result;
 }
 #define ABI(fn,a,b,c,d) checked_call((uintptr_t)(fn),(uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),(uintptr_t)(d))
@@ -437,7 +438,8 @@ static void test_abi(void) {
     Fixture *f=fixture(512,1); FatEntry e,found; FatCursor cursor; FatCreate request={U("ABI.bin"),0,0};
     FatTransfer transfer; FatStamp stamp={0,0,0,0,0,0,0x20}; SectorBuffer extra={0}; uint32_t chain[2],value;
     unsigned char data[517],out[517];
-    report("Win64 nonvolatile preservation / volatile callback clobbers / common error exits");
+    report("Win64 registers / home-space clobbers and bounds / packed DWORDs / fifth argument");
+    OK(ABI(abi_home_probe,0,0,0,0));
     OK(ABI(fat_mount,&f->id,&f->fault,NULL,&f->workspace));
     OK(ABI(fat_create,&f->id,2,&request,&e));
     memset(data,0xA9,sizeof(data)); transfer=(FatTransfer){data,0,sizeof(data),0};

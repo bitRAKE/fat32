@@ -2,13 +2,13 @@
 ; provider view across both passes. The first pass validates every logical slot;
 ; the second reuses ordinary name decoding and its exact lookup comparison.
 section '.text$fat_check_names' code readable executable comdat any align 16
-proc fat_check_names uses rbx rsi rbp r13 r14 r15
+proc fat_check_names uses rbx rsi rbp r13 r14 r15, short_name:26
     locals
         cursor FatCursor
         current FatEntry
         alias FatEntry
-        short_name dw 13 dup ?
     endl
+    assert short_name+26-(parmbase@proc) <= 32
 body:
     mov r13, rcx
     mov rbp, rdx

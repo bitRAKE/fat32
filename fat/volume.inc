@@ -360,10 +360,8 @@ endp
 ; EAX=status. Zero output first; publish {count,last} only at valid EOC. First=0
 ; is empty/F_OK. All checkpoint/count state must survive calls to fat_get.
 section '.text$fat_chain' code readable executable comdat any align 16
-proc fat_chain uses rbx rsi rdi r12 r13 r14 rbp
-	locals
-		next dd ?
-	endl
+proc fat_chain uses rbx rsi rdi r12 r13 r14 rbp, next:4
+	assert next+4-(parmbase@proc) <= 32
 body:
 	mov qword [r8], 0
 	test edx, edx
@@ -574,10 +572,8 @@ endp
 ; publishes output and leaves scratch[0..sector_bytes) zero. Failure leaves out
 ; unchanged; caller must roll back partially staged FAT/data with f_finish.
 section '.text$f_allocate' code readable executable comdat align 16
-proc f_allocate uses rbx rsi rdi rbp r13
-	locals
-		value dd ?
-	endl
+proc f_allocate uses rbx rsi rdi rbp r13, value:4
+	assert value+4-(parmbase@proc) <= 32
 body:
 	mov rbx, rcx
 	mov rsi, rdx

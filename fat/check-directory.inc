@@ -2,16 +2,11 @@
 ; preflight. Stop at the first unused entry; a separate chain check covers tail
 ; allocation. The caller holds its ordinary volume lease throughout.
 section '.text$fat_check_directory' code readable executable comdat any align 16
-proc fat_check_directory uses rbx rsi rdi r12 r13 rbp
+proc fat_check_directory uses rbx rsi rdi r12 r13 rbp, checkpoint:4, power:4, distance:4, steps:4, kind:4, label_seen:4
     locals
         cursor FatCursor
-        checkpoint dd ?
-        power dd ?
-        distance dd ?
-        steps dd ?
-        kind dd ?
-        label_seen dd ?
     endl
+    assert label_seen+4-(parmbase@proc) <= 32
 body:
     mov rsi, r8
     mov r12d, edx

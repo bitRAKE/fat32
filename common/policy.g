@@ -49,6 +49,36 @@ close@proc equ fat32_debug_close
 ; Prefer pointer/32-bit state there when the full routine encodes smaller.
 ; Declare RBP in USES; its save/restore and unwind entry remain mandatory.
 newcoff_debug_procs
+
+; PROC names may describe packed incoming-home scratch instead of arguments.
+; The ABI comments describe actual register arguments; no automatic homing occurs.
+; Keep scratch within 32 bytes and preserve fifth/later argument positions.
+; The debug wrapper defaults to UQUAD even for :4 labels. Keep scalar DWORD
+; metadata consistent with the declared storage, without changing upstream macros.
+mvmacro fat32_cvlocal_one?, cvlocal_one?
+macro cvlocal_one? ref*, namestr*, ty*, strict*
+	if defined ref & ty = CV_T_UQUAD
+		if sizeof ref = 4
+			fat32_cvlocal_one ref, namestr, CV_T_UINT4, strict
+		else
+			fat32_cvlocal_one ref, namestr, ty, strict
+		end if
+	else
+		fat32_cvlocal_one ref, namestr, ty, strict
+	end if
+end macro
+
+; Give a small record its ordinary field names in incoming home space. Offset
+; is relative to the first home byte, not current RSP; the caller owns no values
+; here across this call. Storage is uninitialized and never overlaps outgoing
+; call space. A body: anchor follows declarations that introduce record scopes.
+macro home_struct? name*,type*,offset:0
+	assert offset >= 0 & offset + sizeof.type <= 32
+	virtual at parmbase@proc + offset
+		name type
+	end virtual
+	cvlocal name
+end macro
 section '.text' code readable executable align 16
 
 ; Source call-site policy (the installed fastcall macro is not a parallel move):
