@@ -2,14 +2,50 @@
 
 This policy guides assembly changes to the FAT32 library. It assumes x86-64
 assembly knowledge and the library's Win64 calling convention. The objectives
-are clear contracts, compact emitted code, and correct behavior across provider
-callbacks. A source edit earns its place through its meaning and its assembled
-result; fewer source lines alone establish neither size nor speed.
+are clear contracts, efficient use of processor resources, compact emitted code,
+and correct behavior across provider callbacks. Remove unnecessary work and
+dependencies so the processor can devote more of its finite capacity to useful
+work. A source edit earns its place through its meaning and its assembled result;
+fewer source lines alone establish neither size nor speed.
 
 The procedure configuration is [common/policy.g](../common/policy.g). Public
 contracts live in the root `.inc` interfaces and `fat32.h`; implementation
 invariants are in [DEVELOPING.md](DEVELOPING.md). Apply the rules below to the
 complete procedure, including macro expansion, error paths, and unwind data.
+
+## Processor resources are part of the objective
+
+Review what the processor must fetch, decode, track, execute, and retire on each
+affected path. Retirement commits instruction results in program order;
+even operations with no execution latency can require instruction-processing
+capacity. Code size, operation count, and dependency latency describe different
+demands. Improving any of them can leave resources available for useful work.
+
+| Change | Resource rationale | What to check |
+| --- | --- | --- |
+| Use an existing argument register; remove a redundant copy | Removes an instruction from the instruction stream and its processing requirements | Move elimination may already remove execution latency; do not count every deleted MOV as an ALU operation saved |
+| Reuse a loaded value; remove a redundant load | Removes address-generation and load work, queue demand, and a new load-to-use dependency | The retained value must have the required observation time and survive intervening operations |
+| Shorten a value's lifetime; remove an unnecessary `uses` entry | Avoids the generated stack store and restore load on each affected invocation, as well as their instruction-processing demand | Inspect the complete frame and every return; an architectural register count alone does not measure physical-register pressure |
+| Keep eligible flag writers next to their branch | Allows fusion to reduce the internal operations competing for dispatch, issue, and retirement | Eligibility depends on the processor, operands, addressing, and combined instruction length |
+| Use shorter encodings and share epilogues | Reduces instruction footprint and can improve use of instruction-cache lines and fetch/decode windows | Byte savings alone do not establish fewer internal operations; shared exits can add a taken branch |
+
+AMD's [Zen 4 Software Optimization Guide][zen4-sog], publication 57647,
+revision 1.01 (April 2023), gives concrete mechanisms: instruction cache and
+fetch/decode in sections 2.6.1 and 2.9 (pages 17 and 26), decoded-operation
+cache in 2.9.1 (pages 26–27), fusion in 2.9.3 (pages 28–29), zero-delay moves
+in 2.9.6 (page 30), dispatch in 2.9.8 (page 31), and load/store queues in
+2.12 (pages 39–40). The [AMD Zen SOG archive][amd-sogs] provides guides for
+other generations. These are processor-specific explanations for the policy;
+the library's x86-64 interface does not require Zen hardware.
+
+Apply this resource model to the actual expanded instructions. Shorter code
+can fit a fetch window better while using the same execution resources. A
+dependency improvement can matter at equal size. A larger sequence can be
+worthwhile when it reduces work at a demonstrated bottleneck. Evaluate the
+complete path and its frequency, including added branches and spills. Record
+the resource mechanism separately from measured application timing; the
+repository results below establish code and path changes, without a measured
+whole-library speedup.
 
 ## 1. Establish the contract before selecting instructions
 
@@ -54,9 +90,12 @@ fastcall fat_dir_open, rcx, [rdx + FatEntry.parent], addr cursor
 
 Passing RBX as the first argument would generate `mov rcx, rbx`. Reading the
 parent through R12 would introduce a source dependency on its preceding copy.
-Keep the saves only if their values are needed later. Removing an emitted
-instruction is a concrete result; removing a source dependency without changing
-size is an opportunity whose timing effect requires measurement.
+Keep the saves only if their values are needed later. Direct use expresses the
+actual dataflow and avoids unnecessary copies. When a copy disappears, its
+instruction-processing demand disappears too. If only the source register
+changes, the emitted instruction count may stay the same. Zen 4 documents
+zero-delay register moves in [section 2.9.6][zen4-sog], so removing this source
+dependency need not remove an execution cycle on that processor.
 
 The September volume review applies the same principle to initial geometry
 loads and stores in `fat_mount`, `f_directory`, and `f_allocate`. The equivalent
@@ -94,7 +133,10 @@ that RAX always survives `fastcall`.
 `f_info_unknown` now loads the scratch-buffer address into R8, validates and
 updates that buffer, then passes R8 directly as the write callback's third
 argument. The former R9 choice required a second load into R8. Removing that
-seven-byte load accounts for the entire procedure's size reduction.
+seven-byte load accounts for the entire procedure's size reduction. On each
+path reaching the write, it also removes a load, its address-generation work,
+and the outgoing argument's dependency on that new load. The already available
+buffer address supplies the argument directly.
 
 Reuse an existing register when its former value is dead on every reachable
 path. `fat_get` can replace its identity pointer in RBX with the FAT-buffer
@@ -219,10 +261,17 @@ cmp byte [r12 + FatEntry.raw], '.'
 je .done
 ```
 
-Keep CMP/TEST next to its conditional branch. This retains macro-fusion
-opportunities; eligibility depends on the target processor and instruction
-forms. Loading a status between the comparison and branch needlessly separates
-them even though MOV preserves flags.
+Keep CMP/TEST next to its conditional branch. For eligible pairs, fusion reduces
+the internal operation count and frees dispatch, issue, and retirement capacity
+without removing either architectural instruction. Loading a status between
+the comparison and branch needlessly separates them even though MOV preserves
+flags. [Zen 4 section 2.9.3][zen4-sog] describes this benefit and its conditions.
+
+Adjacency alone does not guarantee fusion. In particular, that guide excludes
+flag writers containing both an immediate and a displacement, as in the memory
+guard above. It also restricts RIP-relative addressing and combined instruction
+length. Keep the adjacency policy, then check the actual pair before claiming
+a fusion benefit on a particular processor.
 
 The status must remain live through the taken path. Use a different scratch
 register if a guard needs a temporary value; the earlier `fat_set_info` review
@@ -241,8 +290,13 @@ callback, then exchanges it into EDI. The final exchange returns that status;
 the epilogue restores the caller's RDI. `f_snapshot_done` uses the same compact
 return transfer. In both return cases, the displaced EAX value has no later use.
 
-Treat this as a size choice. No timing comparison was made here, and register
-exchange can have different dependencies and execution cost from a move.
+The compact encoding reduces instruction footprint. [Zen 4 section 2.9.6][zen4-sog]
+also lists register XCHG among its zero-delay operations, including accumulator
+forms. That supports its use here without assuming the same handling on every
+x86-64 processor. Zero delay does not establish zero resource cost, and fewer
+bytes do not establish fewer internal operations. No timing comparison of
+these return sequences was made.
+
 This policy concerns register/register XCHG; a memory XCHG has atomic locking
 semantics and belongs to a different design decision. Instruction semantics
 are specified in the Intel SDM's LEA and XCHG entries, available from the
@@ -283,6 +337,13 @@ one call can change the entry/exit instructions and every local displacement.
 Keep RSP stable through the body rather than inserting untracked pushes or
 temporary stack adjustments. For ABI constraints, see Microsoft's
 [prologue and epilogue rules](https://learn.microsoft.com/en-us/cpp/build/prolog-and-epilog).
+
+This layout also avoids repeated call-area adjustments and frees RBP for useful
+data. Removing an unnecessary `uses` entry then removes actual save/restore
+work as well as its encoding. Zen 4's stack-pointer tracking removes certain
+implicit RSP dependencies ([section 2.9.7][zen4-sog]); it does not remove the
+data store and load required to preserve a register. Count these memory
+operations separately from stack-address dependency handling.
 
 This assembled example has two saved registers, one qword local, and a
 five-argument call:
@@ -326,6 +387,11 @@ can be smaller than a jump to a shared return. A framed routine can save much
 more by sharing restores. Neither return count nor source-label count alone
 measures that tradeoff.
 
+Sharing an epilogue reduces static footprint; a returning invocation still
+executes one restore sequence. Removing entries from `uses` reduces that
+sequence's dynamic work. Keep these effects distinct, and account for any
+additional branch needed to reach the common exit.
+
 Moving `mov rbx,rcx` below the guards in `f_begin` avoids that body instruction
 on rejected calls. It does **not** avoid the entry's `push rbx`: `uses rbx`
 still applies to the whole procedure. Likewise, the early empty-chain case in
@@ -355,9 +421,11 @@ well as ordinary execution tests.
 
 ## 7. Measured repository experience
 
-These are emitted-code measurements, not performance timings. Object-file size
-also includes relocations and debug/unwind information; linked size additionally
-depends on selected functions, alignment, and linker settings.
+These measurements establish emitted code and identifiable work removed from
+execution paths. Timing depends on how those paths use the target processor's
+resources. Object-file size also includes relocations and debug/unwind
+information; linked size additionally depends on selected functions, alignment,
+and linker settings.
 
 ### Earlier register and exit review: `86b1a4e`
 
@@ -455,6 +523,9 @@ preceding volume review, the reduction from `v1.0.0` is **175 bytes**.
 
 This pass removed 20 remaining address-size prefixes from dword LEA calculations.
 Prologue register saves fell from 415 to 397, and emitted returns from 161 to 156.
+These are static totals across the library. Each removed save also removes its
+matching restore from the affected invocation; five fewer encoded returns do
+not mean five fewer returns executed by an operation.
 All remaining multiple-return procedures are leaves without generated restores.
 The named FSInfo layout in [fat/disk.inc](../fat/disk.inc) makes the reader and
 formatter's signatures and adjacent hint fields explicit without changing their
@@ -463,7 +534,11 @@ emitted accesses.
 `fat_dir_open` illustrates the useful value-lifetime transformation: generation
 is read before clearing the disjoint cursor, then written to that cursor. No
 call or generation-changing operation intervenes. The routine no longer retains
-an identity pointer merely to reload the same generation afterward.
+an identity pointer merely to load the generation afterward. Both versions load
+generation once. The improvement removes two pushes and their two pops on every
+invocation, four register copies on the successful path, and its redundant final
+EAX clear. The 11-byte reduction accompanies less instruction-processing and
+stack-memory work, with no need to assume a cycle cost for eliminated moves.
 
 Frame size must still be measured as a whole. `f_check_owner_get` reduced four
 pushes to one, while its fixed allocation grew from 40 to 48 bytes to preserve
@@ -489,14 +564,19 @@ The linker matrices and independent image results are recorded in
 3. **Inspect the object.** Compare complete procedure sizes, instructions, branch
    destinations, relocations, saves, stack allocation, and unwind records.
    Separate code bytes from total object bytes and linked feature size.
+   For each affected path, identify changes to instruction processing, memory
+   operations, dependencies, fusion eligibility, and added branches or spills.
+   Distinguish static counts from work performed on an invocation.
 4. **Run the relevant behavior.** Exercise boundary and failure paths, volatile
    callback clobbers, nonvolatile preservation, and call alignment. Use existing
    regressions where they already expose the changed contract.
 5. **Broaden when the boundary changes.** Procedure/COMDAT changes need link and
    replacement matrices. Calling-convention changes need ABI consumers. A speed
    claim needs measurements on the stated processors and workload.
-6. **Explain the accepted result.** State what work or bytes disappeared, why
-   the semantics remain valid, and which checks support that conclusion.
+6. **Explain the accepted result.** State which processor resources the change
+   uses more efficiently, what work and bytes disappeared, why the semantics
+   remain valid, and which checks support that conclusion. Give processor and
+   workload scope for measured timing; do not turn a byte count into a speedup.
 
 From the repository root, with tools configured as in [BUILD.md](BUILD.md):
 
@@ -511,3 +591,6 @@ Use isolated source trees for historical comparisons, with the same toolchain
 and the appropriate historical include paths. Keep generated objects, traces,
 and machine-specific transcripts in ignored build storage. Publish the source
 reasoning, reproducible scope, and measured result.
+
+[amd-sogs]: https://github.com/bitRAKE/amd_zen_sogs
+[zen4-sog]: https://github.com/bitRAKE/amd_zen_sogs/blob/main/57647/57647_1.01.pdf

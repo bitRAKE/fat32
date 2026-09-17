@@ -27,7 +27,9 @@ particular harness or device.
 
 The [x86-64 coding policy](x86-64_coding_policy.md) explains the rules below
 through source changes, emitted encodings, PROC/ENDP expansion, and repository
-measurements. It also covers value lifetimes and memory changes across calls.
+measurements. It explains how those choices reduce instruction-processing,
+load/store, and dependency demands as well as code size, and covers value
+lifetimes and memory changes across calls.
 
 The static-RSP `PROC`/`ENDP` configuration leaves RBP available as an ordinary
 nonvolatile register. Prefer RBP/EBP for a live pointer or a non-64-bit integer

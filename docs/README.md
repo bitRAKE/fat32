@@ -19,8 +19,8 @@
 ## Developing and validating
 
 - [Implementation](DEVELOPING.md): source structure, register policy, and invariants.
-- [x86-64 coding policy](x86-64_coding_policy.md): instruction choices, PROC/ENDP expansion, and measured review examples.
-- [Validation](VALIDATION.md): measured coverage, code sizes, and limits.
+- [x86-64 coding policy](x86-64_coding_policy.md): processor-resource efficiency, instruction choices, PROC/ENDP expansion, and measured review examples.
+- [Validation](VALIDATION.md): measured coverage, generated code, resource effects, and limits.
 - [Examples](../example/README.md): integration code and its guides.
 - [Tests](../tests/README.md): fixtures and platform harnesses.
 

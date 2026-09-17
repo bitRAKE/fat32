@@ -49,7 +49,7 @@ with zero steady-state metadata reads. These are synthetic request counts.
 The core has no undefined external symbols or OS imports. The Win32 assembly
 demo imports only KERNEL32. The UEFI example has not been boot-tested.
 
-## Code size
+## Generated code and processor resources
 
 The RBP register-allocation review measures the same library behavior before
 and after substitution: total emitted procedure code falls from **27,796 to
@@ -66,10 +66,21 @@ The subsequent [coding-policy review](x86-64_coding_policy.md) reduces the
 27,150-byte release to **26,975 bytes**. Its initial volume pass saves 22 bytes;
 the library-wide pass saves another 153 across 39 smaller procedures, with one
 additional procedure changed at equal size. No reviewed procedure grows.
-The later pass removes 18 prologue register saves and five return instructions.
+The later pass removes 18 prologue register-save sites and five encoded return
+instructions across the library.
 All 149 procedures pass inspection of prologue/epilogue agreement with unwind,
 aligned calls with home space, branch destinations, and retained relocation
 targets and COMDAT associations. RBP remains available as a saved general register.
+
+The resource improvements follow the affected execution paths. For example,
+every `fat_dir_open` invocation avoids two register-save stores and two restore
+loads; its successful path also avoids four register copies and a redundant EAX
+clear. `f_info_unknown` avoids reloading the scratch-buffer pointer before each
+write. These changes reduce instruction-processing and load/store demand.
+Sharing epilogues reduces static instruction footprint while each returning
+invocation still executes one epilogue. The [coding policy's resource rationale](x86-64_coding_policy.md#processor-resources-are-part-of-the-objective)
+connects these changes to AMD's documented mechanisms and separates resource
+effects from whole-library timing, which has not been measured.
 
 The following linked `.text` sizes use the LLD release/archive profile with
 `/OPT:REF /OPT:NOICF`. They include the small probe and linker alignment; they
