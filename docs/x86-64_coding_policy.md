@@ -553,6 +553,76 @@ and policy-ledger capacity. Register reuse must honor the declared low dword.
 The linker matrices and independent image results are recorded in
 [VALIDATION.md](VALIDATION.md).
 
+### Lifetime and loop review against `b4b1c46`
+
+The next pass examines all 22 implementation includes and all 149 procedures.
+The submitted `fat_read_adaptive` edit exposes an argument-ownership error:
+`FatTransfer` is in RDX, while `FatCheckedRead` is in R8. Checking the latter's
+`reserved` field through RDX reads the high dword of the transfer offset. The
+existing nonzero-reserved test fails on that version. The corrected code uses
+R8; a complementary valid read beyond EOF with a nonzero high offset dword now
+checks that the transfer cannot masquerade as the policy. Using the earliest
+value means the earliest value of the **same object**.
+
+Other submitted changes preserve their contracts. `fat_count_free` moves INC
+before the value comparison; that CMP still supplies carry to ADC. The ordered
+range reader keeps callback status in EAX and counts completed sectors in EDI,
+so it can remove the status-transfer tail without changing failure precedence.
+Keeping its requested count in ESI also removes a stack store and two possible
+reloads: ESI already survives the callback by the public ABI.
+
+Both FAT-write hooks now retain a running sector LBA in RSI and its exclusive
+end in RBP. For the entry's sector offset `part`:
+
+- Mirrored: `first = fat_start + part`, `end = first + fat_count * fat_sectors`.
+- Selected FAT: `first = fat_start + active_fat * fat_sectors + part`,
+  `end = first + fat_sectors`.
+- Each successful copy advances `first` by `fat_sectors` and compares it unsigned
+  with `end`. The endpoint includes `part` and is never read or written.
+
+Mounted geometry bounds these addresses within the volume; the endpoint does
+not require more than 32 bits for an accepted mount. The code uses 64-bit LBA
+arithmetic to match the callback interface, with zero-extended geometry fields.
+The loop removes two repeated address calculations per copy, retains the buffer
+in outgoing R8 for the write, and advances through ECX to preserve successful
+EAX. Setup still has a cost; normal one- or two-copy volumes do not imply a large
+iteration saving. Sparse tests cover oversized FATs above the signed 32-bit LBA
+boundary, one through 255 copies, and active-copy selection through index 15.
+They check exact callback counts, high FAT-entry bits, neighboring entries,
+staging, and cache invalidation for both hooks.
+
+| Procedure | Before | After | Main change |
+| --- | ---: | ---: | --- |
+| `fat_put` | 237 | 221 | Running LBA/end pair; no local sector-offset spill |
+| `fat_put_checked` | 279 | 265 | Same loop, retaining comparison and failure behavior |
+| `fat_order_read_range` | 389 | 366 | Direct status exits and retained requested count |
+| `f_order_read` | 102 | 90 | Keep the output in RDI through lookup and copy |
+| `f_order_write` | 172 | 157 | Use the search helper's preserved arguments and returned slot |
+| `f_read_bytes` | 284 | 269 | Reuse RSI for the sector index; keep copy length in EAX across REP |
+| `f_nth` | 98 | 84 | Validate the next cluster once at the loop header, before use |
+| `fat_dir_next` | 644 | 635 | Keep fragment/index temporaries volatile until their last use |
+| `fat_salvage_plan` | 629 | 629 | Remove RSI preservation even though total bytes remain equal |
+
+Procedure code falls from **26,975 to 26,748 bytes**, saving **227 bytes**.
+Of 42 changed procedures, 31 shrink, seven retain their size, and four grow by
+one byte when a direct incoming-register operand needs an extra prefix. Those
+forms express the earlier available value without depending on its saved copy;
+move elimination may already avoid the dependency on a particular processor.
+No timing improvement is inferred from that choice.
+
+Prologue saves fall from **397 to 372**, with matching restores removed. For
+example, `f_order_write` now saves two registers instead of five; fixed allocation
+grows from 32 to 40 bytes, while total entry stack consumption falls from 72 to
+56 bytes. `f_read_bytes` removes its per-sector span store/reload as well as one
+save/restore pair. The return count remains 156: several status tails disappear,
+while the shared epilogues already provide a single return in those procedures.
+
+The fresh baseline and revised objects pass all 149 frame, call, branch,
+relocation and COMDAT checks. The **96-suite** run includes volatile callback
+poisoning and the new argument/geometry cases; linker and independent image
+checks are recorded in [VALIDATION.md](VALIDATION.md). No whole-library or
+processor-specific speedup has been measured.
+
 ## 8. Review procedure
 
 1. **Freeze the comparison.** Record the base revision and proposed source diff.

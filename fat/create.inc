@@ -243,9 +243,9 @@ body:
 	mov r13, r8
 	mov r14, r9
 	mov eax, F_ARGUMENT
-	cmp dword [r13 + FatCreate.directory], 1
+	cmp dword [r8 + FatCreate.directory], 1
 	ja .done
-	fastcall f_name_check, [r13 + FatCreate.name]
+	fastcall f_name_check, [r8 + FatCreate.name]
 	test eax, eax
 	jnz .done
 	mov r15d, edx
@@ -486,8 +486,7 @@ body:
 	fastcall f_snapshot_done, rbx, addr entry, eax
 	test eax, eax
 	jnz .done
-	mov rax, qword [rbx + FatIdentity.generation]
-	mov qword [entry.generation], rax
+	; f_snapshot_done already refreshed the successful entry generation.
 	lea rsi, [entry]
 	mov rdi, r14
 	mov ecx, sizeof.FatEntry
@@ -501,7 +500,7 @@ endp
 ; RCX=identity*, RDX=const existing FatEntry* -> EAX=status.
 ; Active transaction required. Re-enumerate parent to identify only valid LFN
 ; records attached to the SFN, then mark that set deleted. Preserve the chain.
-; Initial setup consumes RCX/RDX directly; saved RBX/R12 are for later calls.
+; Initial setup consumes RCX/RDX directly; saved RBX/RBP are for later calls.
 section '.text$f_erase' code readable executable comdat align 16
 proc f_erase uses rbx rsi rbp r13
 	locals
@@ -524,7 +523,7 @@ body:
 	cmp rax, qword [rbp + FatEntry.index]
 	jne .find
 	mov esi, dword [entry.lfn_count]
-	mov r13, qword [entry.index]
+	mov r13, rax
 	sub r13, rsi
 .erase:
 	fastcall f_slot, rbx, [rbp + FatEntry.parent], r13, addr location
@@ -618,7 +617,7 @@ endp
 ; dot/root/self links; ignore only exact dot records while checking emptiness.
 ; Success invalidates the input snapshot but does not overwrite its memory.
 section '.text$f_remove_record' code readable executable comdat align 16
-proc f_remove_record uses rbx rsi rbp
+proc f_remove_record uses rbx rbp
 	locals
 		cursor FatCursor
 		child FatEntry
@@ -663,12 +662,12 @@ body:
 	cmp al, '.'
 	jne .notempty
 .dot:
-	lea rsi, [child.raw+2]
+	lea rdx, [child.raw+2]
 	mov ecx, 9
 .spaces:
-	cmp byte [rsi], ' '
+	cmp byte [rdx], ' '
 	jne .notempty
-	inc rsi
+	inc rdx
 	dec ecx
 	jnz .spaces
 	jmp .children

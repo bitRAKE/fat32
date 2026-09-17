@@ -144,17 +144,16 @@ proc f_order_find
 endp
 
 section '.text$f_order_read' code readable executable comdat align 16
-proc f_order_read uses rbx rsi rdi rbp
-	mov rbx, rcx
-	mov rbp, r8
+proc f_order_read uses rsi rdi
+	mov rdi, r8
 	mov eax, F_IO
-	cmp dword [rbx + FatOrder.poisoned], 1
+	cmp dword [rcx + FatOrder.poisoned], 1
 	je .done
 	mov eax, F_BUSY
-	cmp dword [rbx + FatOrder.active], 2
+	cmp dword [rcx + FatOrder.active], 2
 	je .done
 	mov eax, F_RANGE
-	cmp rdx, [rbx + FatOrder.ops.base.sectors]
+	cmp rdx, [rcx + FatOrder.ops.base.sectors]
 	jae .done
 	fastcall f_order_find, rcx, rdx
 	test eax, eax
@@ -162,66 +161,61 @@ proc f_order_read uses rbx rsi rdi rbp
 	test r10, r10
 	jz .backend
 	lea rsi, [r10 + sizeof.FatOrderSector]
-	mov rdi, rbp
-	mov ecx, [rbx + FatOrder.ops.base.sector_bytes]
+	mov ecx, [rcx + FatOrder.ops.base.sector_bytes]
 	rep movsb
-	xor eax, eax
 .done:
 	ret
 .backend:
-	mov rax, [rbx + FatOrder.backend]
-	fastcall [rax + SectorOps.read], [rax + SectorOps.context], rdx, rbp
+	mov rax, [rcx + FatOrder.backend]
+	fastcall [rax + SectorOps.read], [rax + SectorOps.context], rdx, rdi
 	jmp .done
 endp
 
 section '.text$f_order_write' code readable executable comdat align 16
-proc f_order_write uses rbx rsi rdi r12 rbp
-	mov rbx, rcx
+proc f_order_write uses rsi rdi
 	mov rsi, r8
-	mov r12, rdx
 	mov eax, F_BUSY
-	cmp dword [rbx + FatOrder.active], 1
+	cmp dword [rcx + FatOrder.active], 1
 	jne .done
 	mov eax, F_RANGE
-	cmp rdx, [rbx + FatOrder.ops.base.sectors]
+	cmp rdx, [rcx + FatOrder.ops.base.sectors]
 	jae .done
 	fastcall f_order_find, rcx, rdx
 	test eax, eax
 	jnz .done
-	mov rbp, r11
 	test r10, r10
 	jz .unique
-	mov eax, [rbx + FatOrder.phase]
+	mov eax, [rcx + FatOrder.phase]
 	cmp [r10 + FatOrderSector.phase], eax
 	je .copy
 	jmp .allocate
 .unique:
-	mov eax, [rbx + FatOrder.slots]
+	mov eax, [rcx + FatOrder.slots]
 	shr eax, 1
-	cmp [rbx + FatOrder.unique], eax
+	cmp [rcx + FatOrder.unique], eax
 	jae .memory
 .allocate:
-	mov eax, [rbx + FatOrder.used]
-	cmp eax, [rbx + FatOrder.capacity]
+	mov eax, [rcx + FatOrder.used]
+	cmp eax, [rcx + FatOrder.capacity]
 	jae .memory
-	cmp dword [rbp], 0
+	cmp dword [r11], 0
 	jne .version
-	inc dword [rbx + FatOrder.unique]
+	inc dword [rcx + FatOrder.unique]
 .version:
-	inc dword [rbx + FatOrder.used]
-	mov edx, [rbx + FatOrder.used]
-	mov [rbp], edx
-	mov edx, [rbx + FatOrder.stride]
-	imul rax, rdx
-	mov r10, [rbx + FatOrder.data]
+	inc dword [rcx + FatOrder.used]
+	mov r8d, [rcx + FatOrder.used]
+	mov [r11], r8d
+	mov r8d, [rcx + FatOrder.stride]
+	imul rax, r8
+	mov r10, [rcx + FatOrder.data]
 	add r10, rax
-	mov [r10 + FatOrderSector.lba], r12
-	mov eax, [rbx + FatOrder.phase]
+	mov [r10 + FatOrderSector.lba], rdx
+	mov eax, [rcx + FatOrder.phase]
 	mov [r10 + FatOrderSector.phase], eax
 	mov dword [r10 + FatOrderSector.reason], 0
 .copy:
 	lea rdi, [r10 + sizeof.FatOrderSector]
-	mov ecx, [rbx + FatOrder.ops.base.sector_bytes]
+	mov ecx, [rcx + FatOrder.ops.base.sector_bytes]
 	rep movsb
 	xor eax, eax
 .done:
@@ -396,8 +390,8 @@ proc f_order_reserved
 	mov r8d, [rcx + FatIdentity.data_start]
 	cmp rdx, r8
 	jae .no
-	sub rdx, rax
-	mov rax, rdx
+	xchg rax, rdx
+	sub rax, rdx
 	xor edx, edx
 	mov r9d, [rcx + FatIdentity.fat_sectors]
 	div r9
@@ -437,13 +431,13 @@ body:
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rbp, r8
-	mov [state.order], rbx
-	mov [state.identity], rsi
-	mov [state.report], rbp
+	mov [state.order], rcx
+	mov [state.identity], rdx
+	mov [state.report], r8
 	mov [state.verify], r9
-	mov r15, [rbx + FatOrder.backend]
+	mov r15, [rcx + FatOrder.backend]
 	mov [state.backend], r15
-	mov rdi, rbp
+	mov rdi, r8
 	mov ecx, sizeof.FatCommitReport
 	xor eax, eax
 	rep stosb

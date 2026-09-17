@@ -131,8 +131,7 @@ endp
 ; Bind evidence to canonical chain_version; content/rename changes do not stale
 ; it. Parent membership, directory records and global ownership are not checked.
 section '.text$fat_check_file' code readable executable comdat any align 16
-proc fat_check_file uses rbx rsi rdi rbp r13
-	mov rbx, rcx
+proc fat_check_file uses rsi rdi rbp r13
 	mov edi, edx
 	mov rsi, r8
 	fastcall f_handle, rcx
@@ -155,9 +154,9 @@ proc fat_check_file uses rbx rsi rdi rbp r13
 	mov [rsi + FatCheck.version], rcx
 	test eax, eax
 	jnz .done
-	mov rbx, [r13 + FatVolume.identity]
+	mov rcx, [r13 + FatVolume.identity]
 	mov eax, [rbp + FatRecord.size]
-	mov ecx, [rbx + FatIdentity.cluster_bytes]
+	mov ecx, [rcx + FatIdentity.cluster_bytes]
 	lea rax, [rax+rcx-1]
 	xor edx, edx
 	div rcx
@@ -176,10 +175,10 @@ proc fat_check_file uses rbx rsi rdi rbp r13
 	mov eax, F_CORRUPT
 	jmp .done
 .invalid:
-	mov ebx, eax
+	mov edx, eax             ; f_check_clear explicitly preserves RDX
 	fastcall f_check_clear, rsi
 	mov dword [rsi + FatCheck.scope], FC_FILE
-	xchg eax, ebx
+	mov eax, edx
 	jmp .done
 endp
 
@@ -224,11 +223,11 @@ proc fat_read_checked uses rbx rsi rdi
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rdi, r8
-	mov dword [rsi + FatTransfer.done], 0
+	mov dword [rdx + FatTransfer.done], 0
 	mov eax, F_ARGUMENT
-	cmp dword [rdi + FatCheckedRead.reserved], 0
+	cmp dword [r8 + FatCheckedRead.reserved], 0
 	jne .done
-	fastcall fat_check_fresh, rcx, [rdi + FatCheckedRead.report]
+	fastcall fat_check_fresh, rcx, [r8 + FatCheckedRead.report]
 	cmp eax, F_STALE
 	jne .checked
 	fastcall fat_check_file, rbx, [rdi + FatCheckedRead.budget], [rdi + FatCheckedRead.report]

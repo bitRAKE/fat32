@@ -2,7 +2,7 @@
 ; preflight. Stop at the first unused entry; a separate chain check covers tail
 ; allocation. The caller holds its ordinary volume lease throughout.
 section '.text$fat_check_directory' code readable executable comdat any align 16
-proc fat_check_directory uses rbx rsi rdi r12 r13 r14 rbp
+proc fat_check_directory uses rbx rsi rdi r12 r13 rbp
     locals
         cursor FatCursor
         checkpoint dd ?
@@ -133,10 +133,10 @@ body:
     mov ecx, [rbp + FatCursor.lfn_count]
     imul ecx, 13
     xor edx, edx
-    xor r14d, r14d               ; zero or terminator offset + 1
+    xor r8d, r8d               ; zero or terminator offset + 1
 .character:
     movzx eax, word [rbp + FatCursor.name+rdx*2]
-    test r14d, r14d
+    test r8d, r8d
     jnz .padding
     test eax, eax
     jz .terminator
@@ -146,7 +146,7 @@ body:
     jae .lfn_bad
     jmp .next_character
 .terminator:
-    lea r14d, [rdx+1]
+    lea r8d, [rdx+1]
     jmp .next_character
 .padding:
     cmp eax, 0FFFFh
@@ -155,9 +155,9 @@ body:
     inc edx
     cmp edx, ecx
     jb .character
-    test r14d, r14d
+    test r8d, r8d
     jz .length
-    lea edx, [r14-1]
+    lea edx, [r8-1]
 .length:
     test edx, edx
     jz .lfn_bad

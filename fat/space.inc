@@ -7,22 +7,22 @@ proc fat_count_free uses rbx rsi rdi rbp r13
 		value dd ?
 	endl
 body:
-	mov rbx, rcx
-	mov r13, rdx
 	mov eax, F_FORMAT
-	cmp dword [rbx + FatIdentity.magic], F_MAGIC
+	cmp dword [rcx + FatIdentity.magic], F_MAGIC
 	jne .done
-	mov edi, [rbx + FatIdentity.cluster_count]
-	add edi, 2
+	mov rbx, rcx
 	mov esi, 2
+	mov r13, rdx
+	mov edi, [rcx + FatIdentity.cluster_count]
+	add edi, 2
 	xor ebp, ebp
 .scan:
 	fastcall fat_get, rbx, esi, addr value
 	test eax, eax
 	jnz .done
+	inc esi
 	cmp dword [value], 1
 	adc ebp, 0
-	inc esi
 	cmp esi, edi
 	jb .scan
 	mov [r13], ebp

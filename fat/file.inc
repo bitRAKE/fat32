@@ -197,12 +197,6 @@ body:
 	test eax, eax
 	jnz .done
 	mov esi, dword [next]
-	cmp esi, 2
-	jb .bad
-	mov eax, dword [rbx + FatIdentity.cluster_count]
-	inc eax
-	cmp esi, eax
-	ja .bad
 	dec edi
 	jmp .loop
 .found:
@@ -220,11 +214,10 @@ endp
 ; Separate from mutation transfers so read-only consumers do not retain writes.
 ; done counts the completed prefix even when a provider read fails.
 section '.text$f_read_bytes' code readable executable comdat align 16
-proc f_read_bytes uses rbx rsi rdi rbp r13 r14
+proc f_read_bytes uses rbx rsi rdi rbp r13
 	locals
 		cluster dd ?
 		inside dd ?
-		span dd ?
 		remaining dd ?
 	endl
 body:
@@ -253,9 +246,9 @@ body:
 	xor edx, edx
 	div dword [rbx + FatIdentity.sector_bytes]
 	mov r13d, edx
-	mov r14d, eax
+	mov esi, eax
 	fastcall f_cluster_sector, rbx, [cluster]
-	add rax, r14
+	add rax, rsi
 	fastcall f_read_sector, rcx, rax, [rcx + FatIdentity.scratch]
 	test eax, eax
 	jnz .done
@@ -265,13 +258,12 @@ body:
 	sub ecx, r13d
 	cmp ecx, eax
 	cmova ecx, eax
-	mov dword [span], ecx
+	mov eax, ecx          ; REP MOVSB preserves this completed span
 	mov edi, dword [rbp + FatTransfer.done]
 	add rdi, [rbp + FatTransfer.data]
 	mov rsi, qword [rbx + FatIdentity.scratch]
 	add rsi, r13
 	rep movsb
-	mov eax, dword [span]
 	add [rbp + FatTransfer.done], eax
 	add [inside], eax
 	mov eax, dword [rbp + FatTransfer.done]
@@ -304,7 +296,7 @@ endp
 ; Caller validates the full range/chain; modes 1/2 require an active transaction.
 ; Destroys scratch; performs partial-sector read/modify/write when editing.
 section '.text$f_write_bytes' code readable executable comdat align 16
-proc f_write_bytes uses rbx rsi rdi rbp r13 r14
+proc f_write_bytes uses rbx rsi rdi rbp r13
 	locals
 		cluster dd ?
 		inside dd ?
@@ -341,9 +333,9 @@ body:
 	xor edx, edx
 	div dword [rbx + FatIdentity.sector_bytes]
 	mov r13d, edx           ; offset inside sector
-	mov r14d, eax           ; sector inside cluster
+	mov esi, eax           ; sector inside cluster
 	fastcall f_cluster_sector, rbx, [cluster]
-	add rax, r14
+	add rax, rsi
 	mov qword [lba], rax
 	fastcall f_read_sector, rcx, rax, [rcx + FatIdentity.scratch]
 	test eax, eax
@@ -400,30 +392,29 @@ endp
 ; EAX=status; done reset/clamped to EOF, partial prefix reported on read failure.
 ; Neither entry nor offset/length changes. See fat32.inc for buffer/alias rules.
 section '.text$f_read_record' code readable executable comdat align 16
-proc f_read_record uses rbx rsi rdi
+proc f_read_record uses rdi
 	locals
 		request FatTransfer
 	endl
 body:
-	mov rbx, rcx
-	mov rsi, rdx
 	mov rdi, r8
-	mov dword [rdi + FatTransfer.done], 0
+	mov dword [r8 + FatTransfer.done], 0
 	fastcall f_basic_file, rcx, rdx
 	test eax, eax
 	jnz .done
-	mov eax, dword [rsi + FatEntry.size]
-	mov rdx, qword [rdi + FatTransfer.offset]
-	cmp rdx, rax
+	; f_basic_file preserves the input registers; only the transfer survives I/O.
+	mov eax, dword [rdx + FatEntry.size]
+	mov r9, qword [r8 + FatTransfer.offset]
+	cmp r9, rax
 	jae .ok
-	sub eax, edx
-	cmp eax, [rdi + FatTransfer.length]
-	cmova eax, [rdi + FatTransfer.length]
+	sub eax, r9d
+	cmp eax, [r8 + FatTransfer.length]
+	cmova eax, [r8 + FatTransfer.length]
 	mov dword [request.length], eax
-	mov qword [request.offset], rdx
-	mov rax, qword [rdi + FatTransfer.data]
+	mov qword [request.offset], r9
+	mov rax, qword [r8 + FatTransfer.data]
 	mov qword [request.data], rax
-	fastcall f_read_bytes, rbx, [rsi + FatEntry.cluster], addr request
+	fastcall f_read_bytes, rcx, [rdx + FatEntry.cluster], addr request
 	mov edx, dword [request.done]
 	mov dword [rdi + FatTransfer.done], edx
 .done:

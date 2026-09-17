@@ -7,7 +7,7 @@ struct FOwnerWalk
 ends
 
 section '.text$fat_check_ownership' code readable executable comdat any align 16
-proc fat_check_ownership uses rbx rsi rdi r12 r13 rbp r15
+proc fat_check_ownership uses rbx rsi rdi r12 rbp r15
     locals
         walk FOwnerWalk
         task_index dd ?
@@ -23,12 +23,12 @@ proc fat_check_ownership uses rbx rsi rdi r12 r13 rbp r15
 body:
     mov rbx, rcx
     mov rsi, rdx
-    mov r13, r8
+    mov r9, r8
     mov rdi, r8
     mov ecx, sizeof.FatOwnershipReport/8
     xor eax, eax
     rep stosq
-    mov rdi, r13
+    mov rdi, r9
     mov qword [rdi + FatOwnershipReport.owner_sector], -1
     mov qword [rdi + FatOwnershipReport.other_sector], -1
     fastcall f_check_init, rbx, rdi, FC_OWNERSHIP
@@ -60,12 +60,12 @@ body:
     jc .range
     cmp dword [rsi + FatOwnershipCheck.fat_budget], 0
     je .fat_limit             ; zero budget does not even clear workspace
-    mov r13, rdi
+    ; f_check_init preserves R9, which still holds the report during clearing.
     mov rdi, [rsi + FatOwnershipCheck.owners]
     mov ecx, [rbx + FatIdentity.cluster_count]
     xor eax, eax
     rep stosq
-    mov rdi, r13
+    mov rdi, r9
     mov r12, [rsi + FatOwnershipCheck.directories]
     mov eax, [rbx + FatIdentity.root_cluster]
     mov [r12 + FatDirectoryTask.first], eax
@@ -125,7 +125,7 @@ body:
     mov [rdi + FatCheck.sector], rdx
     mov eax, [cluster]
     mov [rdi + FatCheck.cluster], eax
-    fastcall f_directory, rbx, rdx
+    fastcall f_directory, rcx, rdx
     test eax, eax
     jnz .io
     mov ebp, [offset]
@@ -453,10 +453,10 @@ proc f_check_owner_chain uses rbx rsi rdi r12 rbp r14 r15
     mov rsi, rdx
     mov rdi, r8
     mov r12, r9
-    mov ebp, [r12 + FOwnerWalk.first]
-    mov r15, [r12 + FOwnerWalk.owner]
+    mov ebp, [r9 + FOwnerWalk.first]
+    mov r15, [r9 + FOwnerWalk.owner]
     xor r14d, r14d
-    fastcall f_check_owner_tag, rdi, r15
+    fastcall f_check_owner_tag, r8, r15
     mov [rdi + FatCheck.first], ebp
     mov [rdi + FatCheck.cluster], ebp
     mov qword [rdi + FatCheck.sector], -1

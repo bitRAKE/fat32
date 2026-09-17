@@ -8,72 +8,68 @@
 section '.text$fat_put_checked' code readable executable comdat any align 16
 proc fat_put_checked uses rbx rsi rdi r12 rbp
 	locals
-		part dq ?
 		old_value dd ?
 		cluster_id dd ?
 	endl
-body:
+
 	mov rbx, rcx
 	mov eax, F_CORRUPT
-	cmp dword [rbx + FatIdentity.magic], F_MAGIC
+	cmp dword [rcx + FatIdentity.magic], F_MAGIC
 	jne .done
 	mov eax, F_ARGUMENT
 	test r8d, 0F0000000h
 	jnz .done
 	mov eax, F_BUSY
-	cmp dword [rbx + FatIdentity.transaction], 1
+	cmp dword [rcx + FatIdentity.transaction], 1
 	jne .done
 	mov r12d, r8d
 	mov dword [cluster_id], edx
 	fastcall fat_get, rcx, edx, addr old_value
 	test eax, eax
 	jnz .done
-	mov edx, dword [cluster_id]
-	mov eax, dword [rbx + FatIdentity.cluster_count]
-	add eax, 2
-	cmp edx, eax
+	mov edx, dword [rbx + FatIdentity.cluster_count]
+	mov eax, dword [cluster_id]
+	add edx, 2
+	cmp eax, edx
 	jae .bad
-	mov eax, edx
 	shl rax, 2
-	xor edx, edx
 	mov ecx, dword [rbx + FatIdentity.sector_bytes]
+	xor edx, edx
 	div rcx
 	mov edi, edx
-	mov qword [part], rax
-	xor esi, esi
+	; As in fat_put, use a 64-bit LBA/end pair, including the sector offset.
+	mov ecx, dword [rbx + FatIdentity.fat_sectors]
+	mov esi, dword [rbx + FatIdentity.fat_start]
+	add rsi, rax
 	mov ebp, dword [rbx + FatIdentity.fat_count]
+	imul rbp, rcx
+	add rbp, rsi
 	cmp dword [rbx + FatIdentity.mirrored], 0
 	jne .copy
-	mov esi, dword [rbx + FatIdentity.active_fat]
-	lea ebp, [rsi+1]
+	mov eax, dword [rbx + FatIdentity.active_fat]
+	imul rax, rcx
+	add rsi, rax
+	lea rbp, [rsi+rcx]
 .copy:
-	mov eax, esi
-	imul eax, [rbx + FatIdentity.fat_sectors]
-	add eax, [rbx + FatIdentity.fat_start]
-	add rax, [part]
-	fastcall f_read_sector, rbx, rax, [rbx + FatIdentity.fat]
+	fastcall f_read_sector, rbx, rsi, [rbx + FatIdentity.fat]
 	test eax, eax
 	jnz .done
-	mov r9, qword [rbx + FatIdentity.fat]
-	mov eax, dword [r9 + rdi]
+	mov r8, qword [rbx + FatIdentity.fat]
+	mov eax, dword [r8 + rdi]
 	mov ecx, eax
 	and ecx, F_MASK
 	cmp ecx, dword [old_value]
 	jne .bad
 	and eax, 0F0000000h
 	or eax, r12d
-	mov dword [r9 + rdi], eax
-	mov eax, esi
-	imul eax, [rbx + FatIdentity.fat_sectors]
-	add eax, [rbx + FatIdentity.fat_start]
-	add rax, [part]
-	fastcall f_write_sector, rbx, rax, [rbx + FatIdentity.fat]
+	mov dword [r8 + rdi], eax
+	fastcall f_write_sector, rbx, rsi, r8
 	test eax, eax
 	jnz .done
-	inc esi
-	cmp esi, ebp
+	mov ecx, [rbx + FatIdentity.fat_sectors]
+	add rsi, rcx
+	cmp rsi, rbp
 	jb .copy
-	xor eax, eax
 .done:
 	mov qword [rbx + FatIdentity.fat_lba], -1
 	ret

@@ -2,7 +2,7 @@
 ; Only a unique prefix with allocated/legal FAT entries is admitted. No writes,
 ; retries, authority choice, directory lookup or ownership claim. See docs/RECOVERY.md.
 section '.text$fat_salvage_plan' code readable executable comdat any align 16
-proc fat_salvage_plan uses rbx rsi rdi r12 rbp r14 r15
+proc fat_salvage_plan uses rbx rdi r12 rbp r14 r15
     locals
         next dd ?
     endl
@@ -68,9 +68,9 @@ body:
     ; A full extent array can still extend the last contiguous run.
     test edi, edi
     jz .new
-    lea esi, [rdi-1]
-    mov eax, [r14 + rsi*8 + FatExtent.first]
-    add eax, [r14 + rsi*8 + FatExtent.count]
+    lea r8d, [rdi-1]
+    mov eax, [r14 + r8*8 + FatExtent.first]
+    add eax, [r14 + r8*8 + FatExtent.count]
     cmp eax, r15d
     je .budget
 .new:
@@ -104,12 +104,12 @@ body:
 .admit:
     test edi, edi
     jz .append
-    lea esi, [rdi-1]
-    mov eax, [r14 + rsi*8 + FatExtent.first]
-    add eax, [r14 + rsi*8 + FatExtent.count]
+    lea r8d, [rdi-1]
+    mov eax, [r14 + r8*8 + FatExtent.first]
+    add eax, [r14 + r8*8 + FatExtent.count]
     cmp eax, r15d
     jne .append
-    inc dword [r14 + rsi*8 + FatExtent.count]
+    inc dword [r14 + r8*8 + FatExtent.count]
     jmp .included
 .append:
     mov [r14 + rdi*8 + FatExtent.first], r15d

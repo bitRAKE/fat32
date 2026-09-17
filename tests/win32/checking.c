@@ -190,6 +190,11 @@ static void test_read_adaptive(void) {
         CHECK(!memcmp(&before,&check,sizeof(check)) && f->provider_reads==reads);
         policy.reserved=0; t.offset=16;
         OK(fat_read_adaptive(&b,&t,&policy)); CHECK(t.done==0 && !check.scope && f->provider_reads==reads);
+        /* The transfer's high offset dword shares the policy reserved offset,
+           but belongs to a different argument. A valid EOF read must accept it. */
+        t.offset=UINT64_C(0x100000010);
+        OK(ABI(fat_read_adaptive,&b,&t,&policy,0));
+        CHECK(t.done==0 && !check.scope && f->provider_reads==reads);
         OK(fat_open(&root,U("GOOD.BIN"),2,&denied)); reads=f->provider_reads;
         CHECK(fat_read_adaptive(&denied,&t,&policy)==F_ARGUMENT && t.done==0 && !check.scope && f->provider_reads==reads);
         OK(fat_close(&denied));

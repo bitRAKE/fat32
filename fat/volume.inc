@@ -283,10 +283,6 @@ endp
 ; Every exit invalidates fat_lba because the cache payload may hold another copy.
 section '.text$fat_put' code readable executable comdat any align 16
 proc fat_put uses rbx rsi rdi r12 rbp
-	locals
-		part dq ?
-	endl
-body:
 	mov rbx, rcx
 	mov eax, F_CORRUPT
 	cmp dword [rcx + FatIdentity.magic], F_MAGIC
@@ -309,37 +305,36 @@ body:
 	xor edx, edx
 	div rcx
 	mov edi, edx
-	mov qword [part], rax
-	xor esi, esi
+	; Keep this entry's LBA and exclusive end across callbacks. The end includes
+	; its sector offset; only earlier LBAs are accessed. Mount bounds the geometry.
+	mov ecx, dword [rbx + FatIdentity.fat_sectors]
+	mov esi, dword [rbx + FatIdentity.fat_start]
+	add rsi, rax
 	mov ebp, dword [rbx + FatIdentity.fat_count]
+	imul rbp, rcx
+	add rbp, rsi
 	cmp dword [rbx + FatIdentity.mirrored], 0
 	jne .copy
-	mov esi, dword [rbx + FatIdentity.active_fat]
-	lea ebp, [rsi+1]
+	mov eax, dword [rbx + FatIdentity.active_fat]
+	imul rax, rcx
+	add rsi, rax
+	lea rbp, [rsi+rcx]
 .copy:
-	mov eax, esi
-	imul eax, [rbx + FatIdentity.fat_sectors]
-	add eax, [rbx + FatIdentity.fat_start]
-	add rax, [part]
-	fastcall f_read_sector, rbx, rax, [rbx + FatIdentity.fat]
+	fastcall f_read_sector, rbx, rsi, [rbx + FatIdentity.fat]
 	test eax, eax
 	jnz .done
-	mov r9, qword [rbx + FatIdentity.fat]
-	mov eax, dword [r9 + rdi]
+	mov r8, qword [rbx + FatIdentity.fat]
+	mov eax, dword [r8 + rdi]
 	and eax, 0F0000000h
 	or eax, r12d
-	mov dword [r9 + rdi], eax
-	mov eax, esi
-	inc esi
-	imul eax, [rbx + FatIdentity.fat_sectors]
-	add eax, [rbx + FatIdentity.fat_start]
-	add rax, [part]
-	fastcall f_write_sector, rbx, rax, [rbx + FatIdentity.fat]
+	mov dword [r8 + rdi], eax
+	fastcall f_write_sector, rbx, rsi, r8
 	test eax, eax
 	jnz .done
-	cmp esi, ebp
+	mov ecx, [rbx + FatIdentity.fat_sectors]
+	add rsi, rcx
+	cmp rsi, rbp
 	jb .copy
-	xor eax, eax
 .done:
 	mov qword [rbx + FatIdentity.fat_lba], -1
 	ret

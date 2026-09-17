@@ -187,7 +187,7 @@ proc fat_stream_sector uses rbx rsi rdi
 endp
 
 section '.text$fat_stream_read' code readable executable comdat any align 16
-proc fat_stream_read uses rbx rsi rdi r12 r13 rbp r15
+proc fat_stream_read uses rbx rsi rdi r12 r13 rbp
 	locals
 		span dd ?
 		inside dd ?
@@ -208,7 +208,6 @@ body:
 	fastcall f_stream_lba, rbx, r12, r8
 	test eax, eax
 	jnz .done
-	mov r15, r10
 	mov [inside], r11d
 	mov eax, [rbx + FatIdentity.sector_bytes]
 	sub eax, r11d
@@ -219,12 +218,12 @@ body:
 	add rdi, [r13 + FatTransfer.data]
 	cmp eax, [rbx + FatIdentity.sector_bytes]
 	jne .partial
-	fastcall f_read_sector, rbx, r15, rdi
+	fastcall f_read_sector, rbx, r10, rdi
 	test eax, eax
 	jnz .done
 	jmp .advance
 .partial:
-	fastcall f_read_sector, rbx, r15, [rbx + FatIdentity.scratch]
+	fastcall f_read_sector, rbx, r10, [rbx + FatIdentity.scratch]
 	test eax, eax
 	jnz .done
 	mov esi, [inside]
@@ -245,7 +244,7 @@ endp
 ; Coalesce physically adjacent mapped clusters, bounded by the provider maximum.
 ; Partial edge sectors reuse the ordinary stream primitive. No FAT/dir I/O.
 section '.text$fat_stream_read_range' code readable executable comdat any align 16
-proc fat_stream_read_range uses rbx rsi rdi r12 r13 r14 rbp
+proc fat_stream_read_range uses rbx rsi r12 r13 r14 rbp
 	locals
 		request FatRangeRequest
 		partial FatTransfer
@@ -294,7 +293,7 @@ body:
 	mov rax, [position]
 	xor edx, edx
 	div dword [rbx + FatIdentity.cluster_bytes]
-	mov edi, eax
+	mov ecx, eax
 	mov eax, [rbx + FatIdentity.cluster_bytes]
 	sub eax, edx
 	xor edx, edx
@@ -304,12 +303,12 @@ body:
 .extend:
 	cmp esi, [wanted]
 	jae .full
-	mov eax, [r8+rdi*4]
-	inc edi
-	cmp edi, [r12 + FatStream.count]
+	mov eax, [r8+rcx*4]
+	inc ecx
+	cmp ecx, [r12 + FatStream.count]
 	jae .request
 	inc eax
-	cmp eax, [r8+rdi*4]
+	cmp eax, [r8+rcx*4]
 	jne .request
 	add esi, [rbx + FatIdentity.cluster_sectors]
 	jmp .extend
@@ -319,15 +318,14 @@ body:
 	mov [request.count], esi
 	mov dword [request.done], 0
 	fastcall [r14 + FatRangeOps.read], [r14 + FatRangeOps.context], addr request
-	mov edi, eax
-	mov eax, [request.done]
-	cmp eax, esi
+	mov edx, [request.done]
+	cmp edx, esi
 	ja .io
-	imul eax, [rbx + FatIdentity.sector_bytes]
-	add [r13 + FatTransfer.done], eax
-	sub ebp, eax
-	test edi, edi
-	jnz .status
+	imul edx, [rbx + FatIdentity.sector_bytes]
+	add [r13 + FatTransfer.done], edx
+	sub ebp, edx
+	test eax, eax
+	jnz .done
 	cmp esi, [request.done]
 	jne .io
 	jmp .loop
@@ -341,20 +339,16 @@ body:
 	cmova eax, ebp
 	mov [partial.length], eax
 	fastcall fat_stream_read, r12, addr partial
-	mov edi, eax
-	mov eax, [partial.done]
-	add [r13 + FatTransfer.done], eax
-	sub ebp, eax
-	test edi, edi
-	jnz .status
+	mov edx, [partial.done]
+	add [r13 + FatTransfer.done], edx
+	sub ebp, edx
+	test eax, eax
+	jnz .done
 	jmp .loop
 .ok:
 	xor eax, eax
 .done:
 	ret
-.status:
-	xchg eax, edi
-	jmp .done
 .io:
 	mov eax, F_IO
 	jmp .done

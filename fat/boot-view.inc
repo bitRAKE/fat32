@@ -28,24 +28,24 @@ body:
     mov rbp, r8
     mov r14, r9
     mov eax, F_BUSY
-    cmp dword [rbx + FatIdentity.magic], 0
+    cmp dword [rcx + FatIdentity.magic], 0
     jne .done
     mov eax, F_LIMIT
-    cmp qword [rbx + FatIdentity.generation], -2
+    cmp qword [rcx + FatIdentity.generation], -2
     jae .done
     mov eax, F_ARGUMENT
-    cmp dword [rbp + FatBootSource.reserved], 0
+    cmp dword [r8 + FatBootSource.reserved], 0
     jne .done
-    cmp dword [r14 + FatWorkspace.reserved], 0
+    cmp dword [r9 + FatWorkspace.reserved], 0
     jne .done
-    mov rdx, [r14 + FatWorkspace.data]
+    mov rdx, [r9 + FatWorkspace.data]
     test rdx, rdx
     jz .done
-    mov ecx, [r14 + FatWorkspace.bytes]
+    mov ecx, [r9 + FatWorkspace.bytes]
     add rdx, rcx
     jc .done
     mov eax, F_RANGE
-    mov edx, [rbp + FatBootSource.sector]
+    mov edx, [r8 + FatBootSource.sector]
     test edx, edx
     jz .done
     cmp edx, 0FFFFh

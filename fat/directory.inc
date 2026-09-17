@@ -179,7 +179,7 @@ endp
 ; F_OK yields an entry; F_END means exhausted. Output/cursor can be partially
 ; changed on error. Caller must not use output unless F_OK; see fat32.inc.
 section '.text$fat_dir_next' code readable executable comdat any align 16
-proc fat_dir_next uses rbx rsi rdi rbp r13 r14
+proc fat_dir_next uses rbx rsi rdi rbp
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rbp, r8
@@ -256,41 +256,41 @@ proc fat_dir_next uses rbx rsi rdi rbp r13 r14
 	; A terminator may be absent when length is a multiple of 13.
 	mov ecx, dword [rsi + FatCursor.lfn_count]
 	imul ecx, 13
-	xor r13d, r13d
-	xor r14d, r14d
+	xor r8d, r8d
+	xor r9d, r9d
 .namecheck:
-	movzx eax, word [rsi + FatCursor.name+r13*2]
-	test r14d, r14d
+	movzx eax, word [rsi + FatCursor.name+r8*2]
+	test r9d, r9d
 	jnz .padding
 	test eax, eax
 	jz .terminate
 	cmp eax, 0FFFFh
 	je .short
-	cmp r13d, 255
+	cmp r8d, 255
 	jae .short
-	mov word [rbp + FatEntry.name+r13*2], ax
+	mov word [rbp + FatEntry.name+r8*2], ax
 	jmp .nextchar
 .terminate:
-	mov r14d, r13d
-	inc r14d                 ; length + 1 distinguishes an empty string
+	mov r9d, r8d
+	inc r9d                 ; length + 1 distinguishes an empty string
 	jmp .nextchar
 .padding:
 	cmp eax, 0FFFFh
 	jne .short
 .nextchar:
-	inc r13d
-	cmp r13d, ecx
+	inc r8d
+	cmp r8d, ecx
 	jb .namecheck
-	test r14d, r14d
+	test r9d, r9d
 	jz .length
-	lea r13d, [r14-1]
+	lea r8d, [r9-1]
 .length:
-	test r13d, r13d
+	test r8d, r8d
 	jz .short
-	cmp r13d, 255
+	cmp r8d, 255
 	ja .short
-	mov word [rbp + FatEntry.name+r13*2], 0
-	mov dword [rbp + FatEntry.name_length], r13d
+	mov word [rbp + FatEntry.name+r8*2], 0
+	mov dword [rbp + FatEntry.name_length], r8d
 	fastcall f_name_check, addr rbp + FatEntry.name
 	test eax, eax
 	jnz .short
@@ -334,13 +334,13 @@ proc fat_dir_next uses rbx rsi rdi rbp r13 r14
 	jne .reset
 	dec eax
 	imul eax, 26
-	lea r13, [rsi + FatCursor.name+rax]
-	lea r14, [f_lfn_offsets]
+	lea r8, [rsi + FatCursor.name+rax]
+	lea r9, [f_lfn_offsets]
 	xor ecx, ecx
 .fragment:
-	movzx edx, byte [r14+rcx]
+	movzx edx, byte [r9+rcx]
 	mov ax, word [rdi+rdx]
-	mov word [r13+rcx*2], ax
+	mov word [r8+rcx*2], ax
 	inc ecx
 	cmp ecx, 13
 	jb .fragment
@@ -464,7 +464,6 @@ body:
 	shl rax, 5
 	jc .bad
 	xor edx, edx
-	mov ecx, dword [rbx + FatIdentity.cluster_bytes]
 	div rcx
 	mov rbp, rax
 	mov eax, edx

@@ -5,13 +5,11 @@ proc fat_order_read_range uses rbx rsi rdi rbp r13 r14 r15
 	locals
 		request FatRangeRequest
 		first dq ?
-		span dd ?
 	endl
 body:
-	mov rbp, rdx
 	mov rbx, [rcx + FatOrderRange.order]
 	mov r13, [rcx + FatOrderRange.backend]
-	mov dword [rbp + FatRangeRequest.done], 0
+	mov dword [rdx + FatRangeRequest.done], 0
 	mov eax, F_IO
 	cmp dword [rbx + FatOrder.poisoned], 1
 	je .done
@@ -26,15 +24,17 @@ body:
 	cmp dword [r13 + FatRangeOps.reserved], 0
 	jne .done
 	mov r14d, [rbx + FatOrder.ops.base.sector_bytes]
-	mov eax, [rbp + FatRangeRequest.count]
-	imul rax, r14
-	add rax, [rbp + FatRangeRequest.data]
-	jc .argument
-	mov eax, [rbp + FatRangeRequest.count]
-	add rax, [rbp + FatRangeRequest.lba]
-	jc .range
-	cmp rax, [rbx + FatOrder.ops.base.sectors]
-	ja .range
+	mov ebp, [rdx + FatRangeRequest.count]
+	imul rbp, r14
+	add rbp, [rdx + FatRangeRequest.data]
+	jc .done
+	mov eax, F_RANGE
+	mov ebp, [rdx + FatRangeRequest.count]
+	add rbp, [rdx + FatRangeRequest.lba]
+	jc .done
+	cmp rbp, [rbx + FatOrder.ops.base.sectors]
+	ja .done
+	mov rbp, rdx
 .loop:
 	mov eax, [rbp + FatRangeRequest.done]
 	cmp eax, [rbp + FatRangeRequest.count]
@@ -78,33 +78,22 @@ body:
 	mov rax, [first]
 	mov [request.lba], rax
 	mov [request.count], esi
-	mov [span], esi
 	mov dword [request.done], 0
 	fastcall [r13 + FatRangeOps.read], [r13 + FatRangeOps.context], addr request
-	mov edi, eax
-	mov eax, [request.done]
-	cmp eax, [span]
+	mov edi, [request.done]
+	cmp edi, esi
 	ja .io
-	add [rbp + FatRangeRequest.done], eax
-	test edi, edi
-	jnz .status
-	cmp eax, [span]
+	add [rbp + FatRangeRequest.done], edi
+	test eax, eax
+	jnz .done
+	cmp edi, esi
 	jne .io
 	jmp .loop
 .ok:
 	xor eax, eax
 .done:
 	ret
-.status:
-	xchg eax, edi
-	jmp .done
 .io:
 	mov eax, F_IO
-	jmp .done
-.argument:
-	mov eax, F_ARGUMENT
-	jmp .done
-.range:
-	mov eax, F_RANGE
 	jmp .done
 endp

@@ -6,7 +6,7 @@ compiler transcripts remain in ignored build storage.
 
 ## Automated coverage
 
-The Windows harness passes **95 suites** against the assembled library. C sources
+The Windows harness passes **96 suites** against the assembled library. C sources
 compile as C17 with warnings treated as errors. Fixtures encode BPBs, FATs,
 directories, and file patterns independently; sparse providers model complete
 FAT32 extents without allocating an entire volume.
@@ -15,7 +15,7 @@ FAT32 extents without allocating an entire volume.
 | --- | --- |
 | Geometry and formatting | All 31 supported sector/cluster combinations; primary/backup BPB, FAT/root/FSInfo, labels, exact callback counts, ordinary/verified policies, and every callback failure |
 | Files and directories | Reads, overwrite, zero-filled extension, truncation, metadata, same-parent rename, deletion, empty directories, LFN lengths and damage, alias fallback, and 4 GiB limits |
-| Allocation and mutation | Fragmented/backward chains, high-nibble preservation, active FATs, exhaustion, every staging failure, and preservation of the previous overlay on rollback |
+| Allocation and mutation | Fragmented/backward chains, high-nibble preservation, active FATs, unsigned LBA strides across 1..255 FAT copies, exhaustion, every staging failure, and preservation of the previous overlay on rollback |
 | Shared ownership | Canonical same-file objects, independent positions, affected-file versions, iterators, parent pins, pool/reference limits, and stale mounts |
 | ABI and workspace | All eight nonvolatile GPRs, callback alignment, volatile-register poisoning, nonzero upper halves of narrow register arguments, exact three-sector workspaces, canaries, and failure before I/O on invalid storage |
 | Concurrency | A competing thread while a provider/commit is suspended under the optional gate; busy callers preserve output/state |
@@ -28,7 +28,10 @@ FAT32 extents without allocating an entire volume.
 
 Fragmented, shared, stream, and mutation tests include 128-KiB and 256-KiB
 clusters. Large-directory tests cross a 256-KiB cluster. File data is also read
-beyond a 4 GiB device-byte offset.
+beyond a 4 GiB device-byte offset. Sparse FAT-hook fixtures mount oversized FATs
+with data starts above the signed 32-bit LBA boundary. Both hooks check exact
+callback counts, copy selection, neighboring entries, and high-nibble preservation.
+Adaptive reads distinguish the policy reserved field from a 64-bit transfer offset.
 
 For the 600-cluster stream fixture, setup traverses 599 links in eight FAT-sector
 reads. Reading 307,183 bytes then uses 304 range calls and one edge-sector call,
@@ -82,6 +85,17 @@ invocation still executes one epilogue. The [coding policy's resource rationale]
 connects these changes to AMD's documented mechanisms and separates resource
 effects from whole-library timing, which has not been measured.
 
+The following lifetime/loop review reduces **26,975 to 26,748 bytes**, saving
+**227 bytes** across 42 changed procedures. Thirty-one shrink, seven keep their
+size, and four grow by one byte for direct incoming-register operands. Prologue
+save sites fall from 397 to 372; emitted returns remain at 156. Both FAT-write
+hooks retain their copy LBA across callbacks, `f_read_bytes` keeps its span in EAX
+across REP instead of spilling it, and private helper preservation contracts
+allow fewer saved registers in the ordered provider and record reader. All 149
+procedures pass the same object checks. The policy documents the argument-owner
+regression caught in the submitted adaptive-read edit and the scope of the new
+96-suite evidence.
+
 The following linked `.text` sizes use the LLD release/archive profile with
 `/OPT:REF /OPT:NOICF`. They include the small probe and linker alignment; they
 are not the sum of selected procedure sizes and are not performance timings.
@@ -93,35 +107,35 @@ The tests enforce separate ceilings without relaxing them for this review.
 | `fat-view` | 1,002 |
 | `boot-view` | 1,194 |
 | `policy` | 1,754 |
-| `policy-read` | 5,898 |
-| `policy-adaptive` | 6,490 |
+| `policy-read` | 5,834 |
+| `policy-adaptive` | 6,410 |
 | `salvage-plan` | 922 |
 | `salvage-read` | 1,322 |
 | `format-plan` | 474 |
 | `format` | 1,690 |
 | `format-verified` | 1,786 |
-| `put` | 1,002 |
-| `put-checked` | 1,178 |
+| `put` | 986 |
+| `put-checked` | 1,162 |
 | `free-space` | 922 |
-| `read` | 3,914 |
-| `append` | 8,314 |
-| `full` | 9,882 |
-| `shared-read` | 4,330 |
-| `shared-write` | 9,194 |
-| `shared-full` | 11,386 |
-| `locked-read` | 4,410 |
-| `checked-read` | 5,146 |
-| `adaptive-read` | 5,162 |
+| `read` | 3,850 |
+| `append` | 8,202 |
+| `full` | 9,738 |
+| `shared-read` | 4,266 |
+| `shared-write` | 9,098 |
+| `shared-full` | 11,242 |
+| `locked-read` | 4,330 |
+| `checked-read` | 5,066 |
+| `adaptive-read` | 5,082 |
 | `diagnostics` | 2,234 |
 | `directory-check` | 3,386 |
-| `name-check` | 5,146 |
-| `ownership-check` | 3,066 |
-| `ordered-write` | 11,354 |
-| `verified-write` | 11,466 |
-| `stream-read` | 4,474 |
-| `stream-map` | 4,298 |
-| `range-read` | 4,874 |
-| `ordered-range` | 12,874 |
+| `name-check` | 5,114 |
+| `ownership-check` | 3,050 |
+| `ordered-write` | 11,226 |
+| `verified-write` | 11,338 |
+| `stream-read` | 4,442 |
+| `stream-map` | 4,282 |
+| `range-read` | 4,826 |
+| `ordered-range` | 12,682 |
 
 
 Per-function `.pdata`, `.xdata`, and CodeView contributions remain associated

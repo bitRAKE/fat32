@@ -187,11 +187,11 @@ endp
 
 ; RCX=state*. Build the BPB in scratch; no callbacks or writes.
 section '.text$f_format_boot' code readable executable comdat align 16
-proc f_format_boot uses rbx rsi rdi
+proc f_format_boot uses rbx rdi
     mov rbx, rcx
     fastcall f_format_zero, rcx
     mov rdi, [rbx + f_format_state.scratch]
-    mov rsi, [rbx + f_format_state.options]
+    mov rdx, [rbx + f_format_state.options]
     mov word [rdi], 058EBh
     mov byte [rdi+2], 090h
     mov rax, 'FAT32   '
@@ -205,7 +205,7 @@ proc f_format_boot uses rbx rsi rdi
     mov byte [rdi+21], 0F8h
     mov word [rdi+24], 63
     mov word [rdi+26], 255
-    mov eax, [rsi + FatFormatOptions.hidden_sectors]
+    mov eax, [rdx + FatFormatOptions.hidden_sectors]
     mov [rdi+28], eax
     mov eax, [rbx + f_format_state.plan.total_sectors]
     mov [rdi+32], eax
@@ -216,9 +216,9 @@ proc f_format_boot uses rbx rsi rdi
     mov word [rdi+50], 6
     mov byte [rdi+64], 80h
     mov byte [rdi+66], 29h
-    mov eax, [rsi + FatFormatOptions.serial]
+    mov eax, [rdx + FatFormatOptions.serial]
     mov [rdi+67], eax
-    fastcall f_format_label, rsi, addr rdi+71
+    fastcall f_format_label, rdx, addr rdi+71
     test eax, eax
     jnz .label
     mov rax, 'NO NAME '

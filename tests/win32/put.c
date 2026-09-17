@@ -84,3 +84,51 @@ static void test_put_failures(void) {
         destroy(f);
     }
 }
+
+static void test_put_lba_span(void) {
+    /* High stride/end values in the first two layouts; later layouts also
+       read and stage FAT copies at LBAs above INT32_MAX. */
+    static const struct { unsigned copies; uint32_t sectors; } layouts[]={
+        {1,0x80000101u},{2,0x40000101u},{3,0x50000101u},
+        {16,0x0f000101u},{255,0x00f0f101u}
+    };
+    report("FAT hook LBA spans / oversized FATs / unsigned strides / 1..255 mirrors / active copy selection");
+    for(unsigned layout=0;layout<sizeof(layouts)/sizeof(layouts[0]);++layout)
+    for(unsigned selected=0;selected<2;++selected) for(unsigned strict=0;strict<2;++strict) {
+        Fixture *f=fixture(512,1); Image *d=&f->disk;
+        unsigned copies=layouts[layout].copies, active=selected?(copies<16?copies-1:15):0;
+        unsigned touched=selected?1:copies;
+        uint32_t cluster=d->clusters+1, offset=(cluster*4)%d->bytes;
+        unsigned char out[512], *boot=page(d,0,0)->data;
+        d->fats=copies; d->fat_sectors=layouts[layout].sectors;
+        uint64_t data=32+(uint64_t)copies*d->fat_sectors;
+        uint64_t total=data+d->clusters;
+        CHECK(total<=UINT32_MAX && data>INT32_MAX);
+        d->data=(uint32_t)data; d->ops.sectors=total;
+        f->buffer.ops.sectors=f->inner.sectors=f->fault.sectors=total;
+        boot[16]=(unsigned char)copies; wr32(boot+32,(uint32_t)total);
+        wr32(boot+36,d->fat_sectors); wr16(boot+40,selected?0x80u+active:0);
+        memcpy(page(d,6,1)->data,boot,d->bytes);
+        for(unsigned copy=0;copy<copies;++copy) {
+            fat_value(d,copy,cluster,((copy%16u)<<28)|7u);
+            fat_value(d,copy,cluster-1,0x76543210u);
+        }
+        OK(fat_mount(&f->id,&f->fault,NULL,&f->workspace));
+        CHECK(f->id.fat_count==copies && f->id.active_fat==active);
+        CHECK(f->id.cluster_count==d->clusters);
+        uint64_t reads=f->provider_reads;
+        put_begin(f); f->fail_stage=(int)touched;
+        OK(ABI(put_hooks[strict],&f->id,cluster,0x0ffffff7u,0));
+        CHECK(f->provider_reads-reads==touched+strict && f->fail_stage==0);
+        CHECK(f->buffer.pages==touched && f->id.fat_lba==UINT64_MAX);
+        put_end(f,1);
+        for(unsigned copy=0;copy<copies;++copy) {
+            uint64_t lba=32+(uint64_t)copy*d->fat_sectors+(uint64_t)cluster*4/d->bytes;
+            unsigned changed=!selected || copy==active;
+            OK(sb_read(&f->buffer,lba,out));
+            CHECK(rd32(out+offset)==(((copy%16u)<<28)|(changed?0x0ffffff7u:7u)));
+            CHECK(rd32(out+offset-4)==0x76543210u);
+        }
+        CHECK(!d->writes); destroy(f);
+    }
+}

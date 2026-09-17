@@ -7,18 +7,18 @@ proc fat_view_open uses rbx rsi rdi
     mov rbx, rcx
     mov rsi, rdx
     mov eax, F_BUSY
-    cmp dword [rbx + FatIdentity.magic], 0
+    cmp dword [rcx + FatIdentity.magic], 0
     jne .done
-    cmp dword [rsi + FatIdentity.transaction], 0
+    cmp dword [rdx + FatIdentity.transaction], 0
     jne .done
     mov eax, F_STALE
-    cmp dword [rsi + FatIdentity.magic], F_MAGIC
+    cmp dword [rdx + FatIdentity.magic], F_MAGIC
     jne .done
     mov eax, F_RANGE
-    cmp r8d, [rsi + FatIdentity.fat_count]
+    cmp r8d, [rdx + FatIdentity.fat_count]
     jae .done
     mov eax, F_LIMIT
-    mov r10, [rbx + FatIdentity.generation]
+    mov r10, [rcx + FatIdentity.generation]
     cmp r10, -2                 ; reserve a generation for close, never wrap
     jae .done
     mov eax, F_ARGUMENT
@@ -37,7 +37,7 @@ proc fat_view_open uses rbx rsi rdi
     jb .done
     ; Copy geometry only as an implementation convenience; all mutable state,
     ; caches and provider capabilities below are independent of the source.
-    mov rdi, rbx
+    mov rdi, rcx
     mov ecx, sizeof.FatIdentity/8
     rep movsq
     mov [rbx + FatIdentity.generation], r10
@@ -72,19 +72,19 @@ endp
 ; The caller drains operations first, and keeps referenced view storage alive.
 section '.text$fat_view_close' code readable executable comdat any align 16
 proc fat_view_close uses rbx
-    mov rbx, rcx
     mov eax, F_STALE
-    cmp dword [rbx + FatIdentity.magic], F_MAGIC
+    cmp dword [rcx + FatIdentity.magic], F_MAGIC
     jne .done
     mov eax, F_BUSY
-    cmp dword [rbx + FatIdentity.transaction], 0
+    cmp dword [rcx + FatIdentity.transaction], 0
     jne .done
     ; Explicit cache invalidation may have consumed the reserved generation.
     ; Closing must still retire the view without enabling a later reopen.
-    cmp qword [rbx + FatIdentity.generation], -1
+    cmp qword [rcx + FatIdentity.generation], -1
     jne .invalidate
-    dec qword [rbx + FatIdentity.generation]
+    dec qword [rcx + FatIdentity.generation]
 .invalidate:
+    mov rbx, rcx
     fastcall fat_invalidate, rcx
     mov dword [rbx + FatIdentity.magic], 0
 .done:

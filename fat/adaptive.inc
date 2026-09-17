@@ -5,12 +5,12 @@ proc fat_read_adaptive uses rbx rsi rdi rbp
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rdi, r8
-	mov dword [rsi + FatTransfer.done], 0
+	mov dword [rdx + FatTransfer.done], 0
 	mov eax, F_ARGUMENT
-	cmp dword [rdi + FatCheckedRead.reserved], 0
+	cmp dword [r8 + FatCheckedRead.reserved], 0
 	jne .done
 	; Respect already diagnosed damage only while its file/chain view is current.
-	fastcall fat_check_fresh, rcx, [rdi + FatCheckedRead.report]
+	fastcall fat_check_fresh, rcx, [r8 + FatCheckedRead.report]
 	cmp eax, F_CORRUPT
 	je .done
 	; Scope zero denotes no diagnosis for this attempt, not checked-good health.
@@ -21,7 +21,7 @@ proc fat_read_adaptive uses rbx rsi rdi rbp
 	cmp eax, F_IO
 	jne .done
 .diagnose:
-	mov ebp, eax
+	xchg ebp, eax
 	fastcall fat_check_file, rbx, [rdi + FatCheckedRead.budget], [rdi + FatCheckedRead.report]
 	; A successful diagnosis cannot turn a failed read into success. Diagnostics
 	; do not touch the caller's output, completed prefix or independent position.

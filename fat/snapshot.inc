@@ -5,7 +5,7 @@ proc fat_read uses rbx rsi rdi
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rdi, r8
-	mov dword [rdi + FatTransfer.done], 0
+	mov dword [r8 + FatTransfer.done], 0
 	fastcall f_file, rcx, rdx
 	test eax, eax
 	jnz .done
@@ -19,7 +19,7 @@ proc fat_write uses rbx rsi rdi rbp
 	mov rbx, rcx
 	mov rsi, rdx
 	mov rdi, r8
-	mov dword [rdi + FatTransfer.done], 0
+	mov dword [r8 + FatTransfer.done], 0
 	fastcall f_file, rcx, rdx
 	test eax, eax
 	jnz .done

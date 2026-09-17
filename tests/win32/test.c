@@ -511,7 +511,7 @@ int main(int argc,char **argv) {
     test_shared(512,1); test_shared(512,128); test_shared(4096,16);
     test_shared_capacity(); test_shared_directories(); test_shared_rollback(); test_shared_basic_read(); test_shared_gate();
     test_shared_workspace();
-    test_put(); test_put_failures();
+    test_put(); test_put_failures(); test_put_lba_span();
     test_format(); test_format_admission(); test_format_failures();
     test_view(); test_view_admission(); test_view_staging();
     test_salvage(); test_salvage_damage(); test_salvage_admission(); test_salvage_large();

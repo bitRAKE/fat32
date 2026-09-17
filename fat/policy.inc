@@ -15,23 +15,20 @@ proc f_policy_current
     jne .done
     cmp [r11 + FatIdentity.shared], r10
     jne .done
-    mov rax, [r11 + FatIdentity.generation]
-    cmp rax, [rcx + FatPolicy.generation]
-    jne .stale
-    cmp rax, [r10 + FatVolume.generation]
-    jne .stale
-    mov rax, [r10 + FatVolume.epoch]
-    cmp rax, [rcx + FatPolicy.epoch]
-    jne .stale
+    mov r9, [r11 + FatIdentity.generation]
+    cmp r9, [rcx + FatPolicy.generation]
+    jne .done
+    cmp r9, [r10 + FatVolume.generation]
+    jne .done
+    mov r9, [r10 + FatVolume.epoch]
+    cmp r9, [rcx + FatPolicy.epoch]
+    jne .done
     mov eax, F_BUSY
     cmp dword [r11 + FatIdentity.transaction], 0
     jne .done
     xor eax, eax
 .done:
     ret
-.stale:
-    mov eax, F_STALE
-    jmp .done
 endp
 
 ; Zeroed/closed output, current shared volume, FatCheck[capacity], capacity.
@@ -108,7 +105,7 @@ endp
 ; RCX=current policy, RDX=immediate report; called under the active lease.
 ; Only current structural/attention/verification evidence restricts capabilities.
 section '.text$f_policy_note' code readable executable comdat align 16
-proc f_policy_note uses rbx rsi rdi rbp r13
+proc f_policy_note uses rbx rsi rdi rbp
     locals
         handle FatHandle
     endl
@@ -163,18 +160,18 @@ body:
     cmp dword [rbp + FatCheck.status], F_CORRUPT
     jne .global
     mov rsi, [rbx + FatPolicy.reports]
-    xor r13d, r13d
+    xor r8d, r8d
 .existing:
-    cmp r13d, [rbx + FatPolicy.count]
+    cmp r8d, [rbx + FatPolicy.count]
     jae .new
     mov rax, [rsi + FatCheck.object]
     cmp rax, [rbp + FatCheck.object]
     je .ok                      ; pinned object cannot retire while policy lives
     add rsi, sizeof.FatCheck
-    inc r13d
+    inc r8d
     jmp .existing
 .new:
-    cmp r13d, [rbx + FatPolicy.capacity]
+    cmp r8d, [rbx + FatPolicy.capacity]
     jae .memory
     mov rdx, [rbp + FatCheck.object]
     cmp dword [rdx + FatObject.references], -1

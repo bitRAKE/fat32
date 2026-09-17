@@ -2,7 +2,7 @@
 ; provider view across both passes. The first pass validates every logical slot;
 ; the second reuses ordinary name decoding and its exact lookup comparison.
 section '.text$fat_check_names' code readable executable comdat any align 16
-proc fat_check_names uses rbx rsi rdi rbp r13 r14 r15
+proc fat_check_names uses rbx rsi rbp r13 r14 r15
     locals
         cursor FatCursor
         current FatEntry
@@ -70,13 +70,13 @@ body:
     end iterate
     fastcall f_short_name, rbx, addr alias
     lea r13, [alias.name]
-    lea rdi, [short_name]
+    lea rdx, [short_name]
     mov ecx, 13
 .copy_alias:
     mov ax, [r13]
-    mov [rdi], ax
+    mov [rdx], ax
     add r13, 2
-    add rdi, 2
+    add rdx, 2
     dec ecx
     jnz .copy_alias
 .pairs:
@@ -99,13 +99,13 @@ body:
     ; R14 is the next workspace entry. Entries are temporary observations;
     ; no caller may treat this workspace as a set of mutation permissions.
     lea r13, [current]
-    mov rdi, r14
+    mov rdx, r14
     mov ecx, sizeof.FatEntry/8
 .copy_entry:
     mov rax, [r13]
-    mov [rdi], rax
+    mov [rdx], rax
     add r13, 8
-    add rdi, 8
+    add rdx, 8
     dec ecx
     jnz .copy_entry
     inc dword [rsi + FatCheck.count]
@@ -164,7 +164,7 @@ body:
     mov rsi, rdx
     mov rdi, r8
     mov rbp, r9
-    fastcall f_name_equal, addr rsi + FatEntry.name, addr rdi + FatEntry.name
+    fastcall f_name_equal, addr rdx + FatEntry.name, addr r8 + FatEntry.name
     test eax, eax
     jnz .done
     cmp dword [rsi + FatEntry.lfn_count], 0

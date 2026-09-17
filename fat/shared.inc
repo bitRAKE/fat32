@@ -214,9 +214,9 @@ proc fat_volume_init uses rdi
 	je .done
 	mov ecx, r9d
 	shl rcx, 7
-	mov rax, r8
-	add rax, rcx
-	jc .range
+	mov r11, r8
+	add r11, rcx
+	jc .done
 	mov rdi, r8
 	xor eax, eax
 	rep stosb
@@ -243,9 +243,6 @@ proc fat_volume_init uses rdi
 	xor eax, eax
 .done:
 	ret
-.range:
-	mov eax, F_RANGE
-	jmp .done
 endp
 
 ; RCX=volume*, EDX=access, R8=closed output handle*. Check mount lifetime first.
@@ -475,13 +472,13 @@ endp
 
 ; RCX=handle*, RDX=uint64 new size.
 section '.text$fat_handle_resize' code readable executable comdat any align 16
-proc fat_handle_resize uses rbx rsi
-	mov rsi, rdx
+proc fat_handle_resize uses rbx
 	fastcall f_mutable, rcx
 	test eax, eax
 	jnz .done
 	mov rbx, r11
-	fastcall f_resize_record, [r10 + FatVolume.identity], rbx, rsi
+	mov r8, rdx
+	fastcall f_resize_record, [r10 + FatVolume.identity], r11, r8
 	test eax, eax
 	jnz .done
 	; Even equal-size resize may trim an overallocated tail.
@@ -493,13 +490,13 @@ endp
 
 ; RCX=handle*, RDX=FatStamp*. Clearing readonly is permitted.
 section '.text$fat_handle_set_info' code readable executable comdat any align 16
-proc fat_handle_set_info uses rbx rsi
-	mov rsi, rdx
+proc fat_handle_set_info uses rbx
 	fastcall f_mutable, rcx
 	test eax, eax
 	jnz .done
 	mov rbx, r11
-	fastcall f_set_record, [r10 + FatVolume.identity], rbx, rsi
+	mov r8, rdx
+	fastcall f_set_record, [r10 + FatVolume.identity], r11, r8
 	test eax, eax
 	jnz .done
 	inc qword [rbx + FatObject.file_version]
@@ -604,8 +601,8 @@ endp
 ; RCX=file/directory handle*, RDX=new component. Identity and child pins survive
 ; a name/slot change. Root cannot be renamed. Same-parent operation only.
 section '.text$fat_handle_rename' code readable executable comdat any align 16
-proc fat_handle_rename uses rbx rsi rdi rbp
-	mov rsi, rdx
+proc fat_handle_rename uses rbx rdi rbp
+	mov r8, rdx
 	fastcall f_mutable, rcx
 	test eax, eax
 	jnz .done
@@ -618,7 +615,7 @@ proc fat_handle_rename uses rbx rsi rdi rbp
 	fastcall f_version_room, rdi
 	test eax, eax
 	jnz .done
-	fastcall f_rename_record, rbp, rbx, rsi
+	fastcall f_rename_record, rbp, rbx, r8
 	test eax, eax
 	jnz .done
 	inc qword [rbx + FatObject.file_version]
@@ -726,14 +723,14 @@ endp
 ; the gate through the entire call (including blocking/yielding callbacks).
 ; Caller-built target/arguments are trusted; target must return normally.
 section '.text$fat_call_locked' code readable executable comdat any align 16
-proc fat_call_locked uses rbx rsi
+proc fat_call_locked uses rbx
 	mov rbx, rcx
-	mov rsi, rdx
+	mov r10, rdx
 	xor eax, eax
 	mov edx, 1
 	lock cmpxchg dword [rbx + FatVolume.gate], edx
 	jnz .busy
-	fastcall [rsi + FatCall.target], [rsi + FatCall.arg1], [rsi + FatCall.arg2], [rsi + FatCall.arg3], [rsi + FatCall.arg4]
+	fastcall [r10 + FatCall.target], [r10 + FatCall.arg1], [r10 + FatCall.arg2], [r10 + FatCall.arg3], [r10 + FatCall.arg4]
 	mov dword [rbx + FatVolume.gate], 0
 .done:
 	ret
