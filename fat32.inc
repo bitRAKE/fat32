@@ -206,8 +206,8 @@ struct FatIdentity
 	?mirrored       dd ?
 	?fsinfo         dd ?
 	?backup         dd ?
-	?next_free      dd ?
-	?free_hint      dd ?
+	?next_free      dd ?        ; bounded FAT search cursor; retained on acceptance
+	?free_hint      dd ?        ; advisory count, unknown after mutation
 	?serial         dd ?
 	?transaction    dd ?
 	?completions    dd ?        ; private transaction counter for snapshot wrappers

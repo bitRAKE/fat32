@@ -18,7 +18,7 @@ typedef struct Image {
 } Image;
 typedef struct Fixture {
     Image disk; SectorBuffer buffer; FatIdentity id; SectorOps fault, inner;
-    int fail_stage; uint64_t provider_reads; FatWorkspace workspace;
+    int fail_stage; uint64_t provider_reads, fat_reads; FatWorkspace workspace;
     unsigned char workspace_data[3*4096];
 } Fixture;
 /* ABI shims poison home space and volatile GPRs after provider callbacks. */
@@ -85,7 +85,11 @@ static void init_image(Image *d,unsigned bytes,unsigned spc) {
     memcpy(page(d,7,1)->data,p,bytes);
     for(c=0;c<2;c++) { fat_value(d,c,0,0x0FFFFFF8); fat_value(d,c,1,0x0FFFFFFF); fat_value(d,c,2,0x0FFFFFFF); }
 }
-static int fault_read(void *v,uint64_t lba,void *out) { Fixture *f=v; ++f->provider_reads; return sb_read(&f->buffer,lba,out); }
+static int fault_read(void *v,uint64_t lba,void *out) {
+    Fixture *f=v; ++f->provider_reads;
+    if(lba>=32 && lba<f->disk.data) ++f->fat_reads;
+    return sb_read(&f->buffer,lba,out);
+}
 static int fault_write(void *v,uint64_t lba,const void *in) {
     Fixture *f=v;
     if(f->fail_stage==0) return F_IO;
@@ -180,6 +184,8 @@ static void test_rollback(void) {
         s=fat_write(&f->id,&e,&t);
         if(!s) { CHECK(t.done==sizeof(data)); destroy(f); break; }
         CHECK(s==F_IO); ++failures; CHECK(t.done==0); CHECK(!memcmp(&e,&before,sizeof(e)));
+        CHECK(f->id.next_free==2 && f->id.free_hint==UINT32_MAX);
+        CHECK(f->id.fat_lba==UINT64_MAX && f->id.dir_lba==UINT64_MAX);
         CHECK(f->buffer.head==head && f->buffer.pages==pages && f->buffer.active==0);
         f->fail_stage=-1; e=lookup(f,2,U("existing")); CHECK(e.size==0 && e.cluster==0); destroy(f);
     }
@@ -488,6 +494,7 @@ static void test_abi(void) {
 #include "stream.c"
 #include "space.c"
 #include "put.c"
+#include "allocation.c"
 #include "format.c"
 #include "format-traces.c"
 #include "view.c"
@@ -503,6 +510,8 @@ int main(int argc,char **argv) {
         return export_commit_trace(argv[2],(unsigned)strtoul(argv[3],NULL,10),(unsigned)strtoul(argv[4],NULL,10));
     if(argc!=1) { fprintf(stderr,"usage: tests.exe [--commit-trace output operation geometry]\n"); return 2; }
     printf("FAT32 verification (assembly library, synthetic sparse sector backends)\n");
+    test_allocation_progress(512,1); test_allocation_progress(512,128); test_allocation_progress(4096,16);
+    test_allocation_wrap(); test_mutation_caches();
     test_geometry(); test_buffer(); test_basic(512,1); test_basic(512,64); test_basic(512,128); test_basic(4096,16);
     test_directories(); test_rollback(); test_fragmented(512,1); test_fragmented(512,128); test_fragmented(4096,16);
     test_large_directory(512,128); test_large_directory(4096,16);

@@ -190,8 +190,10 @@ proc f_read_sector
 endp
 
 ; RCX=identity*, RDX=relative uint64 LBA, R8=readable complete sector.
-; Requires active transaction and LBA < total_sectors. EAX=status; invalidate
-; both cache keys before staging. Input may be an identity cache/scratch sector.
+; Requires active transaction and LBA < total_sectors. EAX=status. Invalidate a
+; cache before staging if its LBA is replaced or its buffer supplied the bytes
+; (the caller may have repurposed it). Unrelated caches remain valid. Input may
+; be an identity cache/scratch sector; rollback clears both keys in f_finish.
 section '.text$f_write_sector' code readable executable comdat align 16
 proc f_write_sector
 	mov eax, F_BUSY
@@ -201,8 +203,20 @@ proc f_write_sector
 	mov eax, F_RANGE
 	cmp rdx, r9
 	jae .done
+	cmp rdx, [rcx + FatIdentity.fat_lba]
+	je .fat_changed
+	cmp r8, [rcx + FatIdentity.fat]
+	jne .directory
+.fat_changed:
 	mov qword [rcx + FatIdentity.fat_lba], -1
+.directory:
+	cmp rdx, [rcx + FatIdentity.dir_lba]
+	je .dir_changed
+	cmp r8, [rcx + FatIdentity.directory]
+	jne .write
+.dir_changed:
 	mov qword [rcx + FatIdentity.dir_lba], -1
+.write:
 	mov rax, qword [rcx + FatIdentity.ops]
 	fastcall [rax + SectorOps.write], [rax + SectorOps.context], rdx, r8
 .done:
@@ -515,7 +529,9 @@ proc f_info_unknown uses rbx rsi rdi
 endp
 
 ; finish(identity, status) publishes or rolls back the complete operation.
-; Clear cache keys after acceptance/rollback without retiring the mount.
+; Acceptance retains the allocation cursor and cache keys still valid after
+; staging. Rollback discards both keys and restarts the bounded FAT search: a
+; cache may contain rejected data and next_free may reflect rejected allocation.
 ; RCX=identity*, EDX=operation status; matching successful f_begin required.
 ; EAX=operation/FSInfo status. Accept only F_OK, otherwise rollback; always end
 ; the savepoint. end callback is void/cannot fail. Shared owners publish their
@@ -536,32 +552,34 @@ proc f_finish uses rbx rdi
 	fastcall [r8 + SectorOps.end], [r8 + SectorOps.context], edx
 	mov dword [rbx + FatIdentity.transaction], 0
 	inc dword [rbx + FatIdentity.completions]
+	mov dword [rbx + FatIdentity.free_hint], -1
+	test edi, edi
+	jz .done
 	mov qword [rbx + FatIdentity.fat_lba], -1
 	mov qword [rbx + FatIdentity.dir_lba], -1
 	mov dword [rbx + FatIdentity.next_free], 2
-	mov dword [rbx + FatIdentity.free_hint], -1
+.done:
 	xchg eax, edi
 	ret
 endp
 
 ; Legacy snapshot policy only. Core/shared transactions never call this.
 ; RCX=identity*, RDX=record* or zero, R8D=completed operation status.
-; Retire snapshots and refresh the successful output, preserving error output.
+; Retire snapshots/shared ownership and refresh only the successful output.
+; f_finish already settled caches/allocation state; advancing the snapshot
+; generation must not invoke the full external-edit reset in fat_invalidate.
 section '.text$f_snapshot_done' code readable executable comdat align 16
-proc f_snapshot_done uses rbx rsi rdi
-	mov rbx, rcx
-	mov rsi, rdx
-	mov edi, r8d
-	fastcall fat_invalidate, rcx
-	test edi, edi
+proc f_snapshot_done
+	inc qword [rcx + FatIdentity.generation]
+	mov qword [rcx + FatIdentity.shared], 0
+	mov eax, r8d
+	test eax, eax
 	jnz .done
-	test rsi, rsi
+	test rdx, rdx
 	jz .done
-	; Invalidation advances the generation; publish the new value to this entry.
-	mov rax, qword [rbx + FatIdentity.generation]
-	mov qword [rsi + FatEntry.generation], rax
+	mov r8, qword [rcx + FatIdentity.generation]
+	mov qword [rdx + FatEntry.generation], r8
 .done:
-	xchg eax, edi
 	ret
 endp
 

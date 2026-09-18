@@ -6,7 +6,7 @@ compiler transcripts remain in ignored build storage.
 
 ## Automated coverage
 
-The Windows harness passes **96 suites** against the assembled library. C sources
+The Windows harness passes **101 suites** against the assembled library. C sources
 compile as C17 with warnings treated as errors. Fixtures encode BPBs, FATs,
 directories, and file patterns independently; sparse providers model complete
 FAT32 extents without allocating an entire volume.
@@ -36,6 +36,33 @@ Adaptive reads distinguish the policy reserved field from a 64-bit transfer offs
 For the 600-cluster stream fixture, setup traverses 599 links in eight FAT-sector
 reads. Reading 307,183 bytes then uses 304 range calls and one edge-sector call,
 with zero steady-state metadata reads. These are synthetic request counts.
+
+### Allocation progress and cache lifetime
+
+A regression fixture occupies clusters 3 through 36,094, then appends six
+clusters in six accepted transactions. The pre-fix snapshot path repeatedly
+searched that prefix: with 512-byte sectors/clusters, provider FAT reads were
+**284, 290, 295, 295, 295, 295**. After retaining the allocation cursor and
+unaffected cache keys, the same fixture reads **283, 7, 11, 12, 12, 12**.
+These totals include chain traversal and mirrored FAT updates, not just allocator
+reads; they measure provider requests, not physical-device latency. This corrects
+a reset also present in earlier `fat_invalidate`-based completion paths; it is not
+evidence that a recent change introduced the defect.
+
+The regression covers snapshot and shared APIs, mirrored and active-FAT modes,
+512-byte and 64-KiB clusters, and 512-byte/4096-byte sectors. Each accepted cursor
+and every appended byte are checked. Further cases cover wraparound, bounded
+full-volume failure, freed-cluster reuse, unknown primary/backup FSInfo hints,
+unaffected FAT-cache hits after metadata writes, and directory-cache hits after
+FAT writes. Existing staging-fault matrices now also assert that rollback clears
+both cache keys and resets the allocation cursor, including failures while
+staging FSInfo. Explicit invalidation retains its full external-edit reset.
+
+Object inspection isolates the change to three of 149 procedures and validates
+their unwind records, restored registers, call alignment, and branch targets.
+Snapshot completion becomes a leaf with no saved registers or stack allocation,
+removing its former 56-byte frame. The added cache-validity decisions increase
+total procedure code by 20 bytes; the other 146 procedures are byte-identical.
 
 ## Linker and example checks
 

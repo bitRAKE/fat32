@@ -69,7 +69,7 @@ Callbacks must not reenter the same identity.
 | Function | Arguments after identity | Result |
 | --- | --- | --- |
 | `fat_mount` | `SectorOps*, uint16_t *oem_or_null, FatWorkspace*` | Decode bounded geometry from the primary BPB |
-| `fat_invalidate` | none | Drop FAT/directory caches and invalidate snapshots |
+| `fat_invalidate` | none | Drop FAT/directory caches, reset allocation hints, and invalidate snapshots/shared ownership |
 | `fat_get` | `uint32_t cluster, uint32_t *value` | Masked FAT entry, including reserved entries 0 and 1 |
 | `fat_count_free` | `uint32_t *count` | Exact free count in the selected current FAT view; unchanged output on error |
 | `fat_chain` | `uint32_t first, uint32_t count_last[2]` | Validate finite chain; return count and final cluster |
@@ -97,6 +97,16 @@ before I/O. Failed mount retires the previous view and leaves magic clear.
 All interpretation and cache management are in `fat32.lib`. A supplied OEM table
 has 256 UTF-16 entries; null selects CP437. There is no Unicode normalization or
 non-ASCII case folding. Damaged LFN sequences fall back to the preserved SFN.
+
+Successful mutations retain the in-memory allocation cursor (`next_free`) and
+unaffected sector caches. The cursor starts a bounded, wrapping FAT search; each
+candidate is checked against the selected FAT. It is independent of the on-disk
+FSInfo hints, which mutations mark unknown when valid FSInfo sectors exist.
+Rollback clears both cache keys and resets the cursor to cluster 2. Explicit
+`fat_invalidate` also resets that state after external edits or discarded staging;
+it advances the generation and retires shared ownership without reloading the BPB.
+Snapshot mutation completion advances the generation separately, preserving the
+cache/cursor disposition of the completed transaction.
 
 ## Files and metadata
 

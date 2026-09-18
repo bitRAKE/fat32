@@ -148,6 +148,8 @@ static void test_shared_rollback(void) {
             else s=fat_handle_set_info(&a,&stamp);
             if(s==F_OK) { destroy(f); break; }
             CHECK(s==F_IO); failed++; CHECK(!memcmp(before,pool,sizeof(pool)));
+            CHECK(f->id.next_free==2 && f->id.free_hint==UINT32_MAX);
+            CHECK(f->id.fat_lba==UINT64_MAX && f->id.dir_lba==UINT64_MAX);
             CHECK(f->id.generation==generation && head==f->buffer.head && pages==f->buffer.pages);
             if(op==0) CHECK(t.done==0);
             f->fail_stage=-1; OK(fat_handle_info(&b,&info)); CHECK(info.size==0);

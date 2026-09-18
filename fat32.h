@@ -27,6 +27,8 @@ typedef struct FatIdentity {
     uint32_t magic, sector_bytes, cluster_sectors, cluster_bytes;
     uint32_t total_sectors, fat_start, fat_sectors, data_start, cluster_count;
     uint32_t root_cluster, fat_count, active_fat, mirrored, fsinfo, backup;
+    /* Library-owned search cursor survives accepted mutations; it is not a
+       promise of free space or the on-disk FSInfo next-free hint. */
     uint32_t next_free, free_hint, serial, transaction, completions;
     uint8_t *fat, *directory, *scratch;
     void *shared;

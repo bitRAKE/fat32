@@ -69,6 +69,11 @@ volatile registers. Calls through `ABI` also guard storage above the target's
 call and checks a real fifth argument. `home-test` inspects their CodeView offsets
 and types and rejects three out-of-bounds `home_struct` layouts at assembly time.
 
+`allocation.c` counts provider FAT reads across accepted appends to catch repeated
+prefix scans. It also checks allocation wrap/exhaustion/reuse and cache lifetime;
+the mutation-fault suites verify cache/cursor rollback. Counts include reads from
+the staging buffer and do not represent physical-device timings.
+
 ## Physical interoperability
 
 Select a FAT32 USB test volume labeled `TESTING`. The runners require its drive,

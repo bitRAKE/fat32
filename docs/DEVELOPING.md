@@ -75,16 +75,23 @@ with register summaries matching the `.inc` contracts and C header.
 4. Shared reads validate encountered links within bounded traversal. Complete
    chain checking and snapshot preflight have separate contracts.
 5. Cache keys never publish failed reads or hide unstaged mutations. A write
-   invalidates affected views; provider rollback restores the prior overlay.
+   invalidates a cache whose LBA is replaced or whose buffer supplies the write;
+   raw buffer reuse must also clear its key. Acceptance keeps unaffected keys.
+   Rollback restores the prior overlay and clears both keys, since cached bytes
+   may belong to the rejected transaction.
 6. LFN records must agree in ordinal, checksum, type, cluster, padding, length,
    and UTF-16 validity. Invalid sets fall back to the short alias.
 7. Newly allocated or exposed file bytes are zeroed. Partial-sector writes
    preserve surrounding bytes; shrinking releases only the validated tail.
 8. Failed mutations preserve prior canonical metadata and staged changes.
    Successful shared publication updates affected object versions. Snapshot
-   mutation retires incompatible shared ownership.
-9. FSInfo is advisory. Allocation scans actual FAT entries and invalidates valid
-   hints after mutation; it never infers exhaustion from a hint alone.
+   completion advances snapshot generation and retires incompatible shared
+   ownership without resetting accepted allocation progress.
+9. FSInfo is advisory. Mutations mark valid on-disk free-count/next-free hints
+   unknown. The independent in-memory `next_free` cursor survives acceptance;
+   rollback or explicit `fat_invalidate` resets it to cluster 2. Allocation scans
+   actual FAT entries, wraps within the data-cluster range, and bounds a full
+   search by `cluster_count`; a cursor never promises free space or exhaustion.
 10. Physical commit is distinct from logical acceptance. Recovery after uncertain
     media writes follows the selected provider and consumer policy.
 
