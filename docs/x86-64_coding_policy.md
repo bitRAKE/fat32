@@ -437,10 +437,11 @@ frequent accesses within short RSP displacements. Filling every home byte is
 not the objective. Longer displacements can increase code size even while
 stack consumption falls.
 
-The project policy corrects the debug wrapper's default qword type for labels
-whose declared size is four bytes. Packed DWORDs retain their real addresses
-and 32-bit CodeView types. The harness checks these records, eight packed fields,
-the real fifth argument, outgoing-home clobbers, and the home-area boundary.
+The fasm2 CodeView wrapper uses an unsigned 32-bit default for labels whose
+declared size is four bytes; explicit type annotations remain authoritative.
+Packed DWORDs retain their real addresses and 32-bit CodeView types. The harness
+checks these records, eight packed fields, the real fifth argument, outgoing-home
+clobbers, and the home-area boundary.
 
 ### RET is an epilogue expansion
 

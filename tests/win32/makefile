@@ -5,6 +5,8 @@
 !IFNDEF WIN32JSON_ROOT
 WIN32JSON_ROOT = ..\win32json
 !ENDIF
+# This root is independent of FASM2_ROOT. Only adapter/demo recipes use it.
+# CALM call/type prerequisites and include order: docs/BUILD.md.
 hostinc = $(WIN32JSON_ROOT)\generated\fasm2_calm\x64;$(WIN32JSON_ROOT);$(FASM2_ROOT)\include
 HOST = build\win32
 TEST_HEADERS = tests\win32\api.h tests\win32\*-api.h fat32.h

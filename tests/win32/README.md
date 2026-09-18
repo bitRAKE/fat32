@@ -9,7 +9,10 @@ The adapter and `sector.lib` are test infrastructure; the product is `fat32.lib`
 
 Install the x64 Visual Studio C++ tools and the fasm2 toolchain described in
 [BUILD.md](../../docs/BUILD.md). Windows adapter assembly also needs the generated
-Win32 projection from win32json. Python and LLVM are used by the linker matrices.
+Win32 projection from [bitRAKE/win32json](https://github.com/bitRAKE/win32json).
+Python and LLVM are used by the linker matrices. The [include dependency
+map](../../docs/BUILD.md#include-dependencies) identifies each source and search
+path; selecting a harness target determines which dependencies are needed.
 
 Run from the repository root:
 
@@ -23,6 +26,23 @@ through `vswhere`. It runs the harness makefile from the repository root.
 override them in the environment or as NMAKE arguments. LLVM comes from
 `LLVM_BIN` or PATH. The core-only makefile needs neither win32json nor this harness.
 
+### Projection prerequisite
+
+Use `generated/fasm2_calm/x64/` with `runtime/static_call64.g` and the selective
+type modules under `types/`. The adapters need `system_memory`,
+`storage_filesystem`, and `system_io`; the demo also needs `system_console` and
+`globalization`. Each source selects its modules before including the policy.
+
+The validated projection revision is
+[`88a3876`](https://github.com/bitRAKE/win32json/commit/88a3876ca2e0c03566730db381a81fd66a0f417b).
+It supplies the dependency-safe scalar call lowerer and selective types needed
+by these adapters. The older `f3a00c1` revision is insufficient: its `fastcall`
+rejects the address operand `&rsi + SectorPage.data`. Core and Win32 assembly
+consumers were also checked against exported committed dependency trees with
+isolated include paths. The core library and UEFI example do not use win32json.
+
+### Targets
+
 | Target | Result |
 | --- | --- |
 | `all` | Library, host tools, and example objects |
@@ -32,6 +52,12 @@ override them in the environment or as NMAKE arguments. LLVM comes from
 | `home-test` | Packed DWORD/fifth-argument debug records and rejected home layouts |
 | `verify` | Core/adapter unwind data, undefined symbols, and example imports |
 | `usbcheck.exe`, `repocheck.exe` | Build physical test tools; do not run them |
+
+`fat32.lib`, `imagecheck.exe`, `ueficheck.exe`, `examples-test`, `readonly-test`,
+`feature-test`, `home-test` and `shadow-test` need no win32json includes.
+`all`, `test`, `examples`, `verify`, `sector.lib`, `usbcheck.exe`, `repocheck.exe`
+and `fatdemo.exe` build Win32 adapters or the Win32 demo and require both roots.
+The target's other tools (C compiler, linker, Python or LLVM) still apply.
 
 Executables, host objects, PDBs, and `sector.lib` are written to `build/win32/`.
 `fat32.obj` / `fat32.lib` stay at the root; example objects stay beside their

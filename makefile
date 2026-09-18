@@ -1,5 +1,6 @@
 # Library-only NMAKE build, run from the repository root.
 # Override tool locations in the environment or as NMAKE arguments.
+# FASM2_ROOT selects bitRAKE/fasm2 (NEWCOFF/proc extensions); see docs/BUILD.md.
 !IFNDEF FASM2_ROOT
 FASM2_ROOT = ..\fasm2
 !ENDIF

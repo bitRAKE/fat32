@@ -49,12 +49,14 @@ them; these stubs do not intercept that separate access.
 From the library root in the configured x64 developer environment:
 
 ```text
-tests\win32\build.cmd examples
+tests\win32\build.cmd example\readonly\readonly.obj
 tests\win32\build.cmd readonly-test
 ```
 
-`examples-test` also includes this test. Override `FASM2_ROOT`, `WIN32JSON_ROOT`
-and `LLVM_BIN` as described in the root build guide when tools are elsewhere.
+`examples-test` also includes this test. Override `FASM2_ROOT` and `LLVM_BIN`
+as described in the [build guide](../../docs/BUILD.md) when tools are elsewhere.
+This example does not use win32json; the broader `examples` target also builds
+the Win32 demo and therefore requires `WIN32JSON_ROOT`.
 
 [test.c](test.c) mounts a deterministic memory-backed FAT32 volume, opens a
 writable handle, and reads a known file before and after attempting every

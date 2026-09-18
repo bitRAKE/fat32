@@ -1,5 +1,10 @@
 ; Shared MS64 NEWCOFF object, static-RSP, unwind, and CodeView policy.
 ; Core objects use struct/proc only. Win32 adapters opt into the projection.
+; External include roots are supplied through INCLUDE by the makefiles:
+;   FASM2_ROOT/include: bitRAKE/fasm2 assembler, NEWCOFF, proc and struct macros.
+;   WIN32JSON_ROOT: generated CALM projection, only when FAT32_WIN32 is defined.
+; That projection also supplies its call lowering; core calls use proc64.inc.
+; Dependency map and required projection files: ../docs/BUILD.md.
 if ~ definite FAT32_POLICY_INCLUDED
 FAT32_POLICY_INCLUDED := 1
 include 'dd.inc'
@@ -53,20 +58,7 @@ newcoff_debug_procs
 ; PROC names may describe packed incoming-home scratch instead of arguments.
 ; The ABI comments describe actual register arguments; no automatic homing occurs.
 ; Keep scratch within 32 bytes and preserve fifth/later argument positions.
-; The debug wrapper defaults to UQUAD even for :4 labels. Keep scalar DWORD
-; metadata consistent with the declared storage, without changing upstream macros.
-mvmacro fat32_cvlocal_one?, cvlocal_one?
-macro cvlocal_one? ref*, namestr*, ty*, strict*
-	if defined ref & ty = CV_T_UQUAD
-		if sizeof ref = 4
-			fat32_cvlocal_one ref, namestr, CV_T_UINT4, strict
-		else
-			fat32_cvlocal_one ref, namestr, ty, strict
-		end if
-	else
-		fat32_cvlocal_one ref, namestr, ty, strict
-	end if
-end macro
+; fasm2's CodeView wrapper records four-byte labels as CV_T_UINT4.
 
 ; Give a small record its ordinary field names in incoming home space. Offset
 ; is relative to the first home byte, not current RSP; the caller owns no values
@@ -81,7 +73,8 @@ macro home_struct? name*,type*,offset:0
 end macro
 section '.text' code readable executable align 16
 
-; Source call-site policy (the installed fastcall macro is not a parallel move):
+; Core call-site policy (proc64's fastcall is not a parallel move):
+; FAT32_WIN32 sources instead select the projection's dependency-safe scheduler.
 ; Arguments are assigned LEFT TO RIGHT: RCX, RDX, R8, R9, then stack arguments.
 ; Identical source/destination registers emit no MOV. Save a live input for later
 ; calls when needed, but use its incoming register at the first call while valid.

@@ -46,9 +46,14 @@ developer prompt, with the required fasm2 toolchain available:
 nmake /nologo
 ```
 
-`FASM2_ROOT` defaults to `../fasm2`; override it in the environment or on the
-NMAKE command line. The core does not need Win32 bindings. See [building and
-linking](docs/BUILD.md) for assembler capabilities and direct-object builds.
+`FASM2_ROOT` selects [bitRAKE/fasm2](https://github.com/bitRAKE/fasm2), including
+its NEWCOFF and procedure extensions, and defaults to `../fasm2`. The Win32
+adapters additionally use [bitRAKE/win32json](https://github.com/bitRAKE/win32json)
+through the separate `WIN32JSON_ROOT` setting, defaulting to `../win32json`.
+The core and UEFI example need only the fasm2 includes. Override either root in
+the environment or on the NMAKE command line; neither setting locates the other.
+See the [include dependency map](docs/BUILD.md#include-dependencies) for required
+files, the harness projection prerequisite, and direct-object builds.
 
 ## Project layout
 
